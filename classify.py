@@ -69,7 +69,11 @@ class survey:
         self.data['start_date'] = clean_date(self.data['start_date'])
         self.data['end_date'] = clean_date(self.data['end_date'])
         
+        # Create time delta and normalise
+
         self.data['time_delta'] = time_delta(self.data['end_date'], self.data['start_date'])
+         
+        self.data['time_delta'] = normalise(self.data['time_delta'])
 
         self.data = pd.concat([
              pd.DataFrame(columns=['org','section']),date_features(self.data['start_date']), self.data],
@@ -77,7 +81,7 @@ class survey:
         )
         
         # Classify all empty relevant comments as 'none'. This has been moved out of the class!
-        # Ned to have a think about whether this should be in the class or not!
+        # Need to have a think about whether this should be in the class or not!
 
         #no_comments = (self.data['comment_further_comments'] == 'none') & (self.data['comment_where_for_help'] == 'none') & (self.data['comment_other_where_for_help'] == 'none') & (self.data['comment_why_you_came'] == 'none')
 
@@ -180,6 +184,7 @@ class survey:
         else:
             print('Full_url column not contained in survey.data object.')
             print('Are you working on a raw data frame? You should be!')
+            
         
         # Take only urls where there is no org or section.
         
@@ -602,8 +607,9 @@ def time_delta(x,y):
     # Expects datetime objects
 
     delta = x - y
-    delta = delta.astype('timedelta64[s]')
-    delta = normalise(delta.astype('int'))
+    delta = np.timedelta64(delta, 's')
+    delta = delta.astype('int')
+    
     return(delta)
 
 def reg_match(r, x, i):
@@ -628,5 +634,4 @@ def reg_match(r, x, i):
     else: 
         found = x
     return(found)
-
 
