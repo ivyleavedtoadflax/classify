@@ -23,3 +23,13 @@ def test_time_delta_type():
     nose.tools.assert_true(
             np.isscalar(classify.time_delta(a,b))
             )
+
+a = pd.Series(pd.date_range('20160102', periods=4))
+b = pd.Series(pd.date_range('20160101', periods=4))
+
+def test_time_delta_list():
+
+    nose.tools.assert_equal(
+            classify.time_delta(a,b),
+            [86400,86400,86400,86400]
+            )

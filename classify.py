@@ -607,9 +607,14 @@ def time_delta(x,y):
     # Expects datetime objects
 
     delta = x - y
+    # Required for old versions!
     delta = np.timedelta64(delta, 's')
     delta = delta.astype('int')
-    
+    #delta = delta.astype('timedelta64[s]')
+    #delta = delta.astype('int')
+
+    # normalise statment moved to method to keep this function simple
+
     return(delta)
 
 def reg_match(r, x, i):
