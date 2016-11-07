@@ -608,10 +608,10 @@ def time_delta(x,y):
 
     delta = x - y
     # Required for old versions!
-    delta = np.timedelta64(delta, 's')
-    delta = delta.astype('int')
-    #delta = delta.astype('timedelta64[s]')
+    #delta = np.timedelta64(delta, 's')
     #delta = delta.astype('int')
+    delta = delta.astype('timedelta64[s]')
+    delta = delta.astype('int')
 
     # normalise statment moved to method to keep this function simple
 
