@@ -57,7 +57,11 @@ class survey:
         self.data['start_date'] = clean_date(self.data['start_date'])
         self.data['end_date'] = clean_date(self.data['end_date'])
         
+        # Create time delta and normalise
+
         self.data['time_delta'] = time_delta(self.data['end_date'], self.data['start_date'])
+         
+        self.data['time_delta'] = normalise(self.data['time_delta'])
 
         self.data = pd.concat([
              pd.DataFrame(columns=['org','section']),date_features(self.data['start_date']), self.data],
@@ -486,8 +490,8 @@ def time_delta(x,y):
     # Expects datetime objects
 
     delta = x - y
-    delta = delta.total_seconds()
-    #delta = delta.astype('timedelta64[s]')
-    delta = normalise(delta.astype('int'))
+    delta = np.timedelta64(delta, 's')
+    #delta = delta.tolist()
+    delta = delta.astype('int')
     
     return(delta)
