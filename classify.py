@@ -148,6 +148,10 @@ class survey:
 
         query = '\/?browse'
 
+        # Add a blank page column
+
+        self.data['page'] = str()
+
         if 'full_url' in list(self.data.columns):
 
             for index, row in self.data.iterrows():
@@ -158,26 +162,37 @@ class survey:
         
                     continue
     
-                # If FCO government/world/country page
+                # If FCO government/world/country page:
+                # Strip back to /government/world and
+                # set org to FCO
     
                 elif re.search('/government/world', str(row['full_url'])):
 
                     self.data.loc[index,['org','page']] = ['Foreign & Commonwealth Office','/government/world']
         
-                # If page starts with /guidance or /government
+                # If full_url starts with /guidance or /government:
+                # and there is no org (i.e. not the above)
+                # Set page to equal full_url                
 
                 elif re.search('\/guidance|\/government', str(row['full_url'])):
                     if row['org'] == 'nan':
                         self.data.loc[index,'page'] = row['full_url']  
     
-                # If page starts with browse
+                # If page starts with browse:
+                # set page to equal /browse/xxx/ 
     
                 elif re.search('\/browse', str(row['full_url'])):
                     self.data.loc[index, 'page'] = reg_match(query, row['full_url'], 1)
               
+                # If the section is also empty:
+                # Set section to be /browse/--this-bit--/
+
                     if row['section'] == 'nan':
                         self.data.loc[index, 'section'] = reg_match(query, row['full_url'], 2)
             
+                # Otherwise:
+                # Strip back to the top level
+
                 else:
                     self.data.loc[index, 'page'] = '/' + reg_match('.*', row['full_url'], 0)
 
@@ -227,10 +242,9 @@ class survey:
         
         # Only run the lookup on cases where we have not already set an org and section
                    
-        
        # self.org_sect = [get_org(i) for i in self.data.loc[((self.data.section == 'nan') &(self.data.org == 'nan')),['page']]]
         self.org_sect = [get_org(i) for i in self.unique_pages['page']]
-        self.org_sect = pd.DataFrame(self.org_sect, columns = column_names)
+        self.org_sect = pd.DataFrame(self.org_sect, columns=column_names)
         self.org_sect = self.org_sect.set_index(self.unique_pages.index)
 
         # Retain the full lookup, but only add a subset of it to the clean dataframe
