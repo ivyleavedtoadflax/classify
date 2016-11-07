@@ -1,12 +1,10 @@
 import numpy as np
 import pandas as pd
-import re
+import re, requests
 from sklearn.preprocessing import LabelEncoder
-import uuid
-from nltk.corpus import stopwords
-from nltk.stem.porter import PorterStemmer
-from nltk import ngrams
-import requests
+#from nltk.corpus import stopwords
+#from nltk.stem.porter import PorterStemmer
+#from nltk import ngrams
 
 class survey:
     """Class for handling intents surveys from google sheets"""
@@ -18,7 +16,6 @@ class survey:
         try:
             
             self.raw = pd.read_csv(x)
-            self.raw['uuid'] = [uuid.uuid4() for x in self.raw.index]
 
             # Strip whitespace from columns to save problems later!
             # Remove no break whitespace first.
@@ -29,6 +26,13 @@ class survey:
             # If raw csv from survey monkey: strip the second row of headers:
             
             self.raw = drop_sub(self.raw)
+
+            # Strange behaviour leading to top 10 rows being filled with NaN.
+            # Drop these by dropping rows with now RespondentID
+
+            self.raw.dropna(subset=['RespondentID'],inplace=True)
+
+            self.raw['RespondentID'] = self.raw['RespondentID'].astype('int')
             
         except Exception as e:
             return('Error loading raw data from file ' + x)
@@ -41,13 +45,21 @@ class survey:
         
     def clean_raw(self):
 
+        print('**********************************')
+        print('*** First cleaning of the data ***')
+        print('**********************************')
+        print('* Creating new date features')
+        print('* Adding simple text features')
+        print('* Cleaning categorical features')
+        print('The cleaned data are stored in survey.data')
+
         self.data = self.raw.copy()
 
         # Use mapping to rename and subset columns
 
         self.data.rename(columns = self.raw_mapping, inplace=True)
 
-	# Subset columns mentioned in mapping dict
+        # Subset columns mentioned in mapping dict
 
         cols = list(self.raw_mapping.values())
         self.data = self.data[cols]
@@ -69,6 +81,7 @@ class survey:
         )
         
         # Classify all empty relevant comments as 'none'. This has been moved out of the class!
+        # Need to have a think about whether this should be in the class or not!
 
         #no_comments = (self.data['comment_further_comments'] == 'none') & (self.data['comment_where_for_help'] == 'none') & (self.data['comment_other_where_for_help'] == 'none') & (self.data['comment_why_you_came'] == 'none')
 
@@ -77,7 +90,7 @@ class survey:
         # Features on column names
 
         try:
-            for col in self.data.columns:
+            for col in self.data:
                 
                 # Is the column entirely NaN?
                 # Currently this is only implemented for comment columns
@@ -85,13 +98,27 @@ class survey:
                 
                 all_null = (self.data[col].isnull().sum() == len(self.data[col]))
                 
+                # Start by cleaning the categorical variables
+
                 if col in self.categories:
                     self.data[col] = clean_category(self.data[col])
+
+                # Now clean the comment variables
+
                 elif 'comment' in col and not all_null:
                     self.data[col + '_capsratio'] = [string_capsratio(x) for x in self.data[col]]
                     self.data[col + '_nexcl'] = [string_nexcl(x) for x in self.data[col]]
                     self.data[col + '_len'] = string_len(self.data[col])
                     self.data[col] = clean_comment(self.data[col])
+
+                elif 'comment' in col and all_null:
+                    self.data[col + '_capsratio'] = 0
+                    self.data[col + '_nexcl'] = 0
+                    self.data[col + '_len'] = 0
+                    self.data[col] = 'none'
+
+                # Finally clean the outcome codes        
+
                 elif col in self.codes:
                     self.data[col] = clean_code(self.data[col], self.code_levels)
                     
@@ -104,40 +131,121 @@ class survey:
                  )
             print(repr(e))
             
+    def clean_urls(self):
+
+        # First apply Sean Craddock's URL filtering rules, and output these cleaned URLs to 
+        # a DataFrame called unique_pages.
+
+        print('***********************************')
+        print('*** Applying URL cleaning rules ***')
+        print('***********************************')
+
+        # Quick fix here - convert the org and section columns back to strings, they previously
+        # were converted to categorical. Need to fix this higher upstream.
+
+        self.data.org = self.data.org.astype('str')
+        self.data.section = self.data.section.astype('str')
+
+        query = '\/?browse'
+
+        if 'full_url' in list(self.data.columns):
+
+            for index, row in self.data.iterrows():
+    
+                # Deal with cases of no address
+                
+                if ((row['full_url'] == '/') | (row['full_url'] == np.nan) | (str(row['full_url']) == 'nan')):
+        
+                    continue
+    
+                # If FCO government/world/country page
+    
+                elif re.search('/government/world', str(row['full_url'])):
+
+                    self.data.loc[index,['org','page']] = ['Foreign & Commonwealth Office','/government/world']
+        
+                # If page starts with /guidance or /government
+
+                elif re.search('\/guidance|\/government', str(row['full_url'])):
+                    if row['org'] == 'nan':
+                        self.data.loc[index,'page'] = row['full_url']  
+    
+                # If page starts with browse
+    
+                elif re.search('\/browse', str(row['full_url'])):
+                    self.data.loc[index, 'page'] = reg_match(query, row['full_url'], 1)
+              
+                    if row['section'] == 'nan':
+                        self.data.loc[index, 'section'] = reg_match(query, row['full_url'], 2)
+            
+                else:
+                    self.data.loc[index, 'page'] = '/' + reg_match('.*', row['full_url'], 0)
+
+        else:
+            print('Full_url column not contained in survey.data object.')
+            print('Are you working on a raw data frame? You should be!')
+            
+        
+        # Take only urls where there is no org or section.
+        
+        self.unique_pages = self.data.loc[(self.data['org'] == 'nan') & (self.data['section'] == 'nan'),'page']
+        
+        # Convert to a DataFrame to make easier to handle
+
+        self.unique_pages = pd.DataFrame(self.unique_pages, columns = ['page'])
+        
+        # Drop duplicate pages!
+
+        self.unique_pages = self.unique_pages.drop_duplicates()
+
+        print('There are ' + str(len(self.unique_pages['page'])) + ' unique URLs to query. These are stored in survey.unique_pages.')
+
+
     def api_lookup(self):
+
+        # Run the api lookup, then subset the return (we're not really interested in most of what we get back)
+        # then merge this back into self.data, using 'page' as the merge key.
 
         print('*********************************************')
         print('*** Looking up urls on gov.uk content API ***')
+        print('*** This may take some time.............. ***')
         print('*********************************************')
+        print('* New org and section will merge into intent.data')
+
+        # This is all a bit messy from the origin function.
+        # Would be good to clean this up at some point.
         
         column_names = ['organisation0',
-                         'organisation1',
-                         'organisation2',
-                         'organisation3',
-                         'organisation4',
-                         'section0',
-                         'section1',
-                         'section2',
-                         'section3']
+                        'organisation1',
+                        'organisation2',
+                        'organisation3',
+                        'organisation4',
+                        'section0',
+                        'section1',
+                        'section2',
+                        'section3']
         
-        if 'full_url' in list(self.data.columns):
-            
-            self.org_sect = [get_org(i) for i in self.data['full_url']]
+        # Only run the lookup on cases where we have not already set an org and section
+                   
         
-            self.org_sect = pd.DataFrame(self.org_sect, columns = column_names)
-            self.org_sect = self.org_sect.set_index(self.data.index)
+       # self.org_sect = [get_org(i) for i in self.data.loc[((self.data.section == 'nan') &(self.data.org == 'nan')),['page']]]
+        self.org_sect = [get_org(i) for i in self.unique_pages['page']]
+        self.org_sect = pd.DataFrame(self.org_sect, columns = column_names)
+        self.org_sect = self.org_sect.set_index(self.unique_pages.index)
 
-            # Retain the full lookup, but only add a subset of it to the clean dataframe
+        # Retain the full lookup, but only add a subset of it to the clean dataframe
 
-            org_sect = self.org_sect[['organisation0','section0']]
-            org_sect.columns = ['org','section']
-            
-            self.data = pd.concat([self.data.drop(['org','section'], axis = 1), org_sect], axis = 1)
+        org_sect = self.org_sect[['organisation0','section0']]
+        org_sect.columns = ['org','section']
         
-        else:
-            print('full_url column not contained in survey.data object.')
-            print('Are you working on a raw data frame? You should be!')
-            
+        self.unique_pages = pd.concat([self.unique_pages, org_sect], axis = 1)
+        
+        print('Lookup complete, merging results back into survey.data')
+
+        self.data = pd.merge(right = self.data.drop(['org','section'], axis=1), left = self.unique_pages, on='page', how='outer')
+
+        self.data.drop_duplicates(subset=['respondent_ID'],inplace=True)
+     
     # Define code to encode to true (defualt to ok)
 
     def trainer(self, classes = None):
@@ -146,7 +254,6 @@ class survey:
             classes = ['ok']
             
         try:
-
             self.cleaned = self.data.copy()
             self.cleaned = self.data[self.selection + self.codes]
             self.cleaned = self.cleaned.dropna(how = 'any')
@@ -176,9 +283,10 @@ class survey:
             self.bin_true = le.transform(classes)
 
             self.cleaned['code1'] = [1 if x in self.bin_true else 0 for x in self.cleaned['code1']] 
-
             #self.cleaned.loc[self.cleaned['code1'] not in self.bin_true,'code1'] = 0
             #self.cleaned.loc[self.cleaned['code1'] in self.bin_true,'code1'] = 1
+
+            self.cleaned.drop('respondent_ID', axis=1, inplace=True)            
 
         except Exception as e:
             print('There was an error while running trainer method')
@@ -200,13 +308,14 @@ class survey:
             for col in self.categories:
                 self.cleaned.loc[:,col] = le.fit_transform(self.cleaned.loc[:,col])
 
+            self.cleaned.drop('respondent_ID', axis=1, inplace=True)            
+
         except Exception as e:
             print('There was an error while subsetting survey data')
             print('Original error message:')
             print(repr(e))
             
     raw_mapping = {
-        'uuid': 'uuid',
         'RespondentID':'respondent_ID',
         'StartDate':'start_date',
         'EndDate': 'end_date',
@@ -252,7 +361,7 @@ class survey:
     'address-problem', 'verify'
     ]
 
-    selection = ['uuid', 'weekday', 'day', 'week', 'month', 'year', 'time_delta'] + categories + [(x + '_len') for x in comments] + [(x + '_nexcl') for x in comments] + [(x + '_capsratio') for x in comments]
+    selection = ['respondent_ID', 'weekday', 'day', 'week', 'month', 'year', 'time_delta'] + categories + [(x + '_len') for x in comments] + [(x + '_nexcl') for x in comments] + [(x + '_capsratio') for x in comments]
 
 def drop_sub(x):
     if x.iloc[0,].str.match('Open-Ended Response').sum():
@@ -401,28 +510,28 @@ def clean_code(x, levels):
 
 # Below copied from Tom Ewings LDA notebook
 
-stops = set(stopwords.words("english"))     # Creating a set of Stopwords
-p_stemmer = PorterStemmer() 
-
-def concat_ngrams(x):
-    #if len(x) > 1 & isinstance(x, list):
-    if isinstance(x, tuple):
-        x = '_'.join(x)
-    return(x)
-
-def cleaner(row):
-    
-    # Function to clean the text data and prep for further analysis
-    text = row.lower()                      # Converts to lower case
-    text = re.sub("[^a-zA-Z]"," ",text)          # Removes punctuation
-    text = text.split()                          # Splits the data into individual words 
-    text = [w for w in text if not w in stops]   # Removes stopwords
-    text = [p_stemmer.stem(i) for i in text]     # Stemming (reducing words to their root)
-    text3 = list(ngrams(text, 2))
-    text2 = list(ngrams(text, 3))
-    text = text + text2 + text3
-    text = list([concat_ngrams(i) for i in text])
-    return(text)  
+#stops = set(stopwords.words("english"))     # Creating a set of Stopwords
+#p_stemmer = PorterStemmer() 
+#
+#def concat_ngrams(x):
+#    #if len(x) > 1 & isinstance(x, list):
+#    if isinstance(x, tuple):
+#        x = '_'.join(x)
+#    return(x)
+#
+#def cleaner(row):
+#    
+#    # Function to clean the text data and prep for further analysis
+#    text = row.lower()                      # Converts to lower case
+#    text = re.sub("[^a-zA-Z]"," ",text)          # Removes punctuation
+#    text = text.split()                          # Splits the data into individual words 
+#    text = [w for w in text if not w in stops]   # Removes stopwords
+#    text = [p_stemmer.stem(i) for i in text]     # Stemming (reducing words to their root)
+#    text3 = list(ngrams(text, 2))
+#    text2 = list(ngrams(text, 3))
+#    text = text + text2 + text3
+#    text = list([concat_ngrams(i) for i in text])
+#    return(text)  
 
 ## Functions dealing with the API lookup
 
@@ -446,37 +555,45 @@ def get_org(x):
 
     url = "https://www.gov.uk/api/search.json?filter_link[]=%s&fields=organisations&fields=mainstream_browse_pages" % x
     
-    print(url)
+    #print('Looking up ' + url)
     
-    #url = "https://www.gov.uk/api/search.json?filter_link[]=%s&fields=y" % (x, y)
+    try:
+       
+        #url = "https://www.gov.uk/api/search.json?filter_link[]=%s&fields=y" % (x, y)
 
-    # read JSON result into r
-    r = requests.get(url).json()
+        # read JSON result into r
+        r = requests.get(url).json()
 
-    # chose the fields you want to scrape. This scrapes the first 5 instances of organisation, error checking as it goes
-    # this exception syntax might not work in Python 3
+        # chose the fields you want to scrape. This scrapes the first 5 instances of organisation, error checking as it goes
+        # this exception syntax might not work in Python 3
 
-    organisation0 = lookup(r,'organisations', 0)
-    organisation1 = lookup(r,'organisations', 1)
-    organisation2 = lookup(r,'organisations', 2)
-    organisation3 = lookup(r,'organisations', 3)
-    organisation4 = lookup(r,'organisations', 4)
-    section0 = lookup(r,'mainstream_browse_pages', 0)
-    section1 = lookup(r,'mainstream_browse_pages', 1)
-    section2 = lookup(r,'mainstream_browse_pages', 2)
-    section3 = lookup(r,'mainstream_browse_pages', 3)
+        organisation0 = lookup(r,'organisations', 0)
+        organisation1 = lookup(r,'organisations', 1)
+        organisation2 = lookup(r,'organisations', 2)
+        organisation3 = lookup(r,'organisations', 3)
+        organisation4 = lookup(r,'organisations', 4)
+        section0 = lookup(r,'mainstream_browse_pages', 0)
+        section1 = lookup(r,'mainstream_browse_pages', 1)
+        section2 = lookup(r,'mainstream_browse_pages', 2)
+        section3 = lookup(r,'mainstream_browse_pages', 3)
 
-    row = [organisation0,
-            organisation1,
-            organisation2,
-            organisation3,
-            organisation4,
-            section0,
-            section1,
-            section2,
-            section3]
+        row = [organisation0,
+                organisation1,
+                organisation2,
+                organisation3,
+                organisation4,
+                section0,
+                section1,
+                section2,
+                section3]
         
-    return(row)
+        return(row)
+
+    except Exception as e:
+        print('Error looking up ' + url)
+        print('Returning "none"')
+        row = ['none'] * 9
+        return(row)
 
 ## Functions dealing with developing a time difference feature
 
@@ -491,7 +608,30 @@ def time_delta(x,y):
 
     delta = x - y
     delta = np.timedelta64(delta, 's')
-    #delta = delta.tolist()
     delta = delta.astype('int')
     
     return(delta)
+
+def reg_match(r, x, i):
+
+    r = r + '/'
+    
+    # r = uncompiled regex query
+    # x = string to search
+    # i = index of captive group (0 = all)
+    
+    p = re.compile(r)
+    s = p.search(x)
+    
+    if s:
+        t = re.split('\/', x, maxsplit=3)
+        if i == 0:
+            found = t[1]
+        if i == 1:
+            found = '/' + t[1] + '/' + t[2]
+        elif i == 2:
+            found = t[2]
+    else: 
+        found = x
+    return(found)
+
