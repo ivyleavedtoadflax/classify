@@ -35,13 +35,6 @@ class survey:
             
             self.raw = drop_sub(self.raw)
 
-            # Strange behaviour leading to top 10 rows being filled with NaN.
-            # Drop these by dropping rows with now RespondentID
-
-            self.raw.dropna(subset=['RespondentID'],inplace=True)
-
-            self.raw['RespondentID'] = self.raw['RespondentID'].astype('int')
-            
         except FileNotFoundError:
             print('*** Target file ', x,' does not exist')
             raise
@@ -63,8 +56,8 @@ class survey:
         self.data = self.raw.copy()
 
         # Use mapping to rename and subset columns
-
-        self.data.rename(columns = self.raw_mapping, inplace=True)
+        ###### No longer required as smartsurvey data is parsed first! ######
+        # self.data.rename(columns = self.raw_mapping, inplace=True)
 
         # Subset columns mentioned in mapping dict
 
