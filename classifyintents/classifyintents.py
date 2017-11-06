@@ -252,7 +252,16 @@ class survey:
         # Only run the lookup on cases where we have not already set an org and section
                    
        # self.org_sect = [get_org(i) for i in self.data.loc[((self.data.section == 'nan') &(self.data.org == 'nan')),['page']]]
-        self.org_sect = [get_org(i) for i in self.unique_pages['page']]
+        self.org_sect = []
+        total_unique = len(self.unique_pages['page'])
+        for i, page in enumerate(self.unique_pages['page']):
+            if i % 10:
+                complete = np.round((i / total_unique) * 100 )
+                print(complete + '% complete')
+            org = get_org(page)
+            self.org_sect.append(org)
+
+        #self.org_sect = [get_org(i) for i in self.unique_pages['page']]
         self.org_sect = pd.DataFrame(self.org_sect, columns=column_names)
         self.org_sect = self.org_sect.set_index(self.unique_pages.index)
  
