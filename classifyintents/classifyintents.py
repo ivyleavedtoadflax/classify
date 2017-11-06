@@ -38,9 +38,9 @@ class survey:
             # Strange behaviour leading to top 10 rows being filled with NaN.
             # Drop these by dropping rows with now RespondentID
 
-            self.raw.dropna(subset=['RespondentID'],inplace=True)
+            self.raw.dropna(subset=['respondent_ID'],inplace=True)
 
-            self.raw['RespondentID'] = self.raw['RespondentID'].astype('int')
+            self.raw['respondent_ID'] = self.raw['respondent_ID'].astype('int')
             
         except FileNotFoundError:
             print('*** Target file ', x,' does not exist')
