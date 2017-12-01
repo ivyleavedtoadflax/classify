@@ -5,6 +5,7 @@ import pandas as pd
 import re, requests
 from sklearn.preprocessing import LabelEncoder
 import os.path
+import sys
 #from nltk.corpus import stopwords
 #from nltk.stem.porter import PorterStemmer
 #from nltk import ngrams
@@ -38,9 +39,9 @@ class survey:
             # Strange behaviour leading to top 10 rows being filled with NaN.
             # Drop these by dropping rows with now RespondentID
 
-            self.raw.dropna(subset=['RespondentID'],inplace=True)
+            self.raw.dropna(subset=['respondent_id'],inplace=True)
 
-            self.raw['RespondentID'] = self.raw['RespondentID'].astype('int')
+            self.raw['respondent_id'] = self.raw['respondent_id'].astype('int')
             
         except FileNotFoundError:
             print('*** Target file ', x,' does not exist')
@@ -349,7 +350,7 @@ class survey:
 
     raw_mapping = {
             "clientID" : "client_id",
-            "UserID" : "respondent_ID",
+            "UserID" : "respondent_id",
             "UserNo" : "user_no_drop",
             "Tracking.Link" : "collector_id",
             "Started" : "start_date",
