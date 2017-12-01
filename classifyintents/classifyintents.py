@@ -349,16 +349,10 @@ class survey:
             print(repr(e))
 
     raw_mapping = {
-            "clientID" : "client_id",
             "UserID" : "respondent_id",
-            "UserNo" : "user_no_drop",
             "Tracking.Link" : "collector_id",
             "Started" : "start_date",
             "Ended" : "end_date",
-            "IP.Address" : "ip_address",
-            "Email" : "email_address",
-            "Name" : "first_name",
-            "Unique.ID" : "unique_id_drop",
             "Page.Path" : "full_url",
             "Q1..Are.you.using.GOV.UK.for.professional.or.personal.reasons.":"cat_work_or_personal",
             "Q2..What.kind.of.work.do.you.do.":"comment_what_work",
