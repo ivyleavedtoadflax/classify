@@ -348,21 +348,26 @@ class survey:
             print(repr(e))
 
     raw_mapping = {
-        'RespondentID':'respondent_ID',
-        'StartDate':'start_date',
-        'EndDate': 'end_date',
-        'Custom Data':'full_url',
-        'Are you using GOV.UK for professional or personal reasons?':'cat_work_or_personal',
-        'What kind of work do you do?':'comment_what_work',
-        'Describe why you came to GOV.UK today.<br /><span style="font-size: 10pt;">Please do not include personal or financial information, eg your National Insurance number or credit card details.</span>' : 'comment_why_you_came',
-        'Have you found what you were looking for?':'cat_found_looking_for',
-        'Overall, how did you feel about your visit to GOV.UK today?':'cat_satisfaction',
-        'Have you been anywhere else for help with this already?':'cat_anywhere_else_help',
-        'Where did you go for help?':'comment_where_for_help',
-        'If you wish to comment further, please do so here.<br><strong><span style="font-size: 10pt;">Please do not include personal or financial information, eg your National Insurance number or credit card details.</span></strong>':'comment_further_comments',
-        'Unnamed: 13':'comment_other_found_what',       
-        'Unnamed: 17':'comment_other_else_help',
-        'Unnamed: 15':'comment_other_where_for_help'
+            "clientID" : "client_id",
+            "UserID" : "respondent_ID",
+            "UserNo" : "user_no_drop",
+            "Tracking.Link" : "collector_id",
+            "Started" : "start_date",
+            "Ended" : "end_date",
+            "IP.Address" : "ip_address",
+            "Email" : "email_address",
+            "Name" : "first_name",
+            "Unique.ID" : "unique_id_drop",
+            "Page.Path" : "full_url",
+            "Q1..Are.you.using.GOV.UK.for.professional.or.personal.reasons.":"cat_work_or_personal",
+            "Q2..What.kind.of.work.do.you.do.":"comment_what_work",
+            "Q3..Describe.why.you.came.to.GOV.UK.todayPlease.do.not.include.personal.or.financial.information..eg.your.National.Insurance.number.or.credit.card.details.":"comment_why_you_came",
+            "Q4..Have.you.found.what.you.were.looking.for." :"cat_found_looking_for",
+            "Q5..Overall..how.did.you.feel.about.your.visit.to.GOV.UK.today." : "cat_satisfaction",
+            "Q5.1..." : "cat_satisfaction",
+            "Q6..Have.you.been.anywhere.else.for.help.with.this.already.":"cat_anywhere_else_help",
+            "Q7..Where.did.you.go.for.help.":"comment_where_for_help",
+            "Q8..If.you.wish.to.comment.further..please.do.so.here.Please.do.not.include.personal.or.financial.information..eg.your.National.Insurance.number.or.credit.card.details.":"comment_further_comments"
     }
 
     categories = [
