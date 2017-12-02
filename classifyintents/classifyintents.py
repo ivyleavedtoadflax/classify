@@ -22,6 +22,7 @@ class survey(object):
 
         self.raw = pd.DataFrame()
         self.data = pd.DataFrame()
+        self.unique_pages = pd.DataFrame()
 
     def load(self, path):
         """
@@ -200,85 +201,99 @@ class survey(object):
         Extract additional features from the gov.uk content API
         """
 
-        self.logger.info('***** Running clean_urls() method *****')
+        self.logger.info('Running clean_urls() method')
 
-        # First apply URL filtering rules, and output these cleaned URLs to 
+        # First apply URL filtering rules, and output these cleaned URLs to
         # a DataFrame called unique_pages.
 
-        # Quick fix here - convert the org and section columns back to strings, they previously
-        # were converted to categorical. Need to fix this higher upstream.
+        # NOTE: Quick fix here - convert the org and section columns back to
+        # strings, they previously were converted to categorical. Need to
+        # fix this higher upstream.
 
         self.data.org = self.data.org.astype('str')
         self.data.section = self.data.section.astype('str')
 
-        query = '\/?browse'
+        # NOTE: The logic for this section was provided as expert knowledge
+        # from a performance analyst familiar with the process. It may need
+        # updating in the future as the content API develops.
+
+        # Set regex query to be used in the reg_match function later.
+
+        query = r'\/?browse'
 
         # Add a blank page column
 
         self.data['page'] = str()
 
-        if 'full_url' in list(self.data.columns):
+        try:
 
-            for index, row in self.data.iterrows():
-    
-                # Deal with cases of no address
-                
-                if ((row['full_url'] == '/') | (row['full_url'] == np.nan) | (str(row['full_url']) == 'nan')):
-        
-                    continue
-    
-                # If FCO government/world/country page:
-                # Strip back to /government/world and
-                # set org to FCO
-    
-                elif re.search('/government/world', str(row['full_url'])):
+            if 'full_url' in list(self.data.columns):
 
-                    self.data.loc[index,['org','page']] = ['Foreign & Commonwealth Office','/government/world']
-        
-                # If full_url starts with /guidance or /government:
-                # and there is no org (i.e. not the above)
-                # Set page to equal full_url                
+                for index, row in self.data.iterrows():
 
-                elif re.search('\/guidance|\/government', str(row['full_url'])):
-                    if row['org'] == 'nan':
-                        self.data.loc[index,'page'] = row['full_url']  
-    
-                # If page starts with browse:
-                # set page to equal /browse/xxx/ 
-    
-                elif re.search('\/browse', str(row['full_url'])):
-                    self.data.loc[index, 'page'] = reg_match(query, row['full_url'], 1)
-              
-                # If the section is also empty:
-                # Set section to be /browse/--this-bit--/
+                    # Deal with cases of no address
 
-                    if row['section'] == 'nan':
-                        self.data.loc[index, 'section'] = reg_match(query, row['full_url'], 2)
-            
-                # Otherwise:
-                # Strip back to the top level
+                    if ((row['full_url'] == '/') | (row['full_url'] == np.nan)
+                            | (str(row['full_url']) == 'nan')):
 
-                else:
-                    self.data.loc[index, 'page'] = '/' + reg_match('.*', row['full_url'], 0)
+                        continue
 
-        else:
-            self.logger.info('Full_url column not contained in survey.data object.')
-            self.logger.info('Are you working on a raw data frame? You should be!')
-            
-        
+                    # If FCO government/world/country page:
+                    # Strip back to /government/world and
+                    # set org to FCO
+
+                    elif re.search('/government/world', str(row['full_url'])):
+
+                        self.data.loc[index, ['org', 'page']] = ['Foreign & Commonwealth Office',
+                                                                 '/government/world']
+
+                    # If full_url starts with /guidance or /government:
+                    # and there is no org (i.e. not the above)
+                    # Set page to equal full_url
+
+                    elif re.search(r'\/guidance|\/government', str(row['full_url'])):
+                        if row['org'] == 'nan':
+                            self.data.loc[index, 'page'] = row['full_url']
+
+                    # If page starts with browse:
+                    # set page to equal /browse/xxx/
+
+                    elif re.search(r'\/browse', str(row['full_url'])):
+                        self.data.loc[index, 'page'] = reg_match(query, row['full_url'], 1)
+
+                    # If the section is also empty:
+                    # Set section to be /browse/--this-bit--/
+
+                        if row['section'] == 'nan':
+                            self.data.loc[index, 'section'] = reg_match(query, row['full_url'], 2)
+
+                    # Otherwise:
+                    # Strip back to the top level
+
+                    else:
+                        self.data.loc[index, 'page'] = '/' + reg_match('.*', row['full_url'], 0)
+
+        except KeyError:
+            self.logger.error("'full_url' column not contained in survey.data object. "
+                              "Ensure you are working with the .data DataFrame.")
+            raise
+
         # Take only urls where there is no org or section.
-        
-        self.unique_pages = self.data.loc[(self.data['org'] == 'nan') & (self.data['section'] == 'nan'),'page']
-        
+
+        self.unique_pages = self.data.loc[(self.data['org'] == 'nan') &
+                                          (self.data['section'] == 'nan'), 'page']
+
         # Convert to a DataFrame to make easier to handle
 
-        self.unique_pages = pd.DataFrame(self.unique_pages, columns = ['page'])
-        
+        self.unique_pages = pd.DataFrame(self.unique_pages, columns=['page'])
+
         # Drop duplicate pages!
 
         self.unique_pages = self.unique_pages.drop_duplicates()
 
-        self.logger.info('*** There are ' + str(len(self.unique_pages['page'])) + ' unique URLs to query. These are stored in survey.unique_pages.')
+        self.logger.info('There are %s unique URLs to query. '
+                         'These are stored in survey.unique_pages.',
+                         str(len(self.unique_pages['page'])))
 
 
     def api_lookup(self):
