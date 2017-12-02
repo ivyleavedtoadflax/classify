@@ -1,65 +1,80 @@
 # coding: utf-8
+"""
+Classifyintents: a collection of classes and functions for
+wrangling data from the govuk intent survey.
+"""
 
+import re
+import sys
+import os.path
 import numpy as np
 import pandas as pd
-import re, requests
 from sklearn.preprocessing import LabelEncoder
-import os.path
-import sys
-#from nltk.corpus import stopwords
-#from nltk.stem.porter import PorterStemmer
-#from nltk import ngrams
+import logging
+import logging.config
 
-class survey:
+class survey(object):
     """Class for handling intents surveys from google sheets"""
 
-    def __init__(self):
-        print('***** Instantiated survey class *****')
-        pass
-  
-    def load(self, x):
+    def __init__(self, logger):
+        self.logger = logger
+        self.logger.info('Instantiated survey class')
 
-        print('***** Running load method *****')
-        print('*** Loading data ', x)
+    def load(self, path):
+        """
+        Load the data from csv file
+
+        The data file will need to have been through some initial cleaning.
+        This is currently handled by the R script reformat.R
+        (https://raw.githubusercontent.com/ukgovdatascience/classifyintentspipe/1de84e053e485c53fd2d82c9512b0dc084487d83/reformat.R)
+
+        An initial check is run to ensure that expect column names are present.
+
+        :param path: <str> Path to the data file.
+        """
+
+        self.logger.info('Running survey.load method')
+        self.logger.info('Loading data %s', path)
 
         try:
-            
-            self.raw = pd.read_csv(x)
 
-            # Strip whitespace from columns to save problems later!
-            # Remove no break whitespace first.
-            
-            self.raw.columns = [i.replace("\xa0", " ") for i in self.raw.columns]
-            self.raw.columns = self.raw.columns.str.strip()
-            
-            # If raw csv from survey monkey: strip the second row of headers:
-            
-            self.raw = drop_sub(self.raw)
+            self.raw = pd.read_csv(path)
 
-            # Strange behaviour leading to top 10 rows being filled with NaN.
-            # Drop these by dropping rows with now RespondentID
-
-            self.raw.dropna(subset=['respondent_id'],inplace=True)
-
-            self.raw['respondent_id'] = self.raw['respondent_id'].astype('int')
-            
         except FileNotFoundError:
-            print('*** Target file ', x,' does not exist')
+            self.logger.exception('Input file %s does not exist', path)
             raise
             
-        except: 
-            print('Unexpected error loading raw data from file ' + x)
-            print('Original error message:', sys.exc_info()[0])
+        except:
+            self.logger.error('Unexpected error loading raw data from file %s', path)
             raise
 
+        # Run check on the incoming columns against expected
+        try:
+
+            assert set(self.raw.columns) == set(self.raw_columns)
+
+        except AssertionError:
+            self.logger.error('Incorrect columns in %s:', path)
+            self.logger.error('Expected: %s,\n Received: %s', set(self.raw.columns), set(self.raw_columns))
+            raise
+
+        self.logger.info('Shape of %s: %s', path, self.raw.shape)
+        self.raw.dropna(subset=['respondent_id'], inplace=True)
+
+        self.logger.info('Shape of %s after dropping missing respondent_ids %s', path, self.raw.shape)
+        
+        # Convert respondent_id to int.
+
+        self.raw['respondent_id'] = self.raw['respondent_id'].astype('int')
+            
         # Define mappings and columns used in iterators
 
         # Clean date columns
         
     def clean_raw(self, date_format=None):
 
-        print('***** Running clean_raw method *****')
-        print('*** The cleaned data are stored in survey.data')
+        self.logger.info('***** Running clean_raw method *****')
+        self.logger.info('*** The cleaned data are stored in survey.data')
 
         self.data = self.raw.copy()
 
@@ -137,18 +152,18 @@ class survey:
                     self.data[col + '_len'] = 0
                     self.data[col] = 'none'
 
-                # Finally clean the outcome codes        
+                # Finally clean the outcome codes
 
                 #elif col in self.codes:
                 #    self.data[col] = clean_code(self.data[col], self.code_levels)
         except: 
-            print('Error cleaning ' + col + ' column')
-            print('Original error message:', sys.exc_info()[0])
+            self.logger.info('Error cleaning ' + col + ' column')
+            self.logger.info('Original error message:', sys.exc_info()[0])
             raise
 
     def clean_urls(self):
 
-        print('***** Running clean_urls() method *****')
+        self.logger.info('***** Running clean_urls() method *****')
 
         # First apply URL filtering rules, and output these cleaned URLs to 
         # a DataFrame called unique_pages.
@@ -210,8 +225,8 @@ class survey:
                     self.data.loc[index, 'page'] = '/' + reg_match('.*', row['full_url'], 0)
 
         else:
-            print('Full_url column not contained in survey.data object.')
-            print('Are you working on a raw data frame? You should be!')
+            self.logger.info('Full_url column not contained in survey.data object.')
+            self.logger.info('Are you working on a raw data frame? You should be!')
             
         
         # Take only urls where there is no org or section.
@@ -226,7 +241,7 @@ class survey:
 
         self.unique_pages = self.unique_pages.drop_duplicates()
 
-        print('*** There are ' + str(len(self.unique_pages['page'])) + ' unique URLs to query. These are stored in survey.unique_pages.')
+        self.logger.info('*** There are ' + str(len(self.unique_pages['page'])) + ' unique URLs to query. These are stored in survey.unique_pages.')
 
 
     def api_lookup(self):
@@ -234,8 +249,8 @@ class survey:
         # Run the api lookup, then subset the return (we're not really interested in most of what we get back)
         # then merge this back into self.data, using 'page' as the merge key.
 
-        print('***** Running api_lookup() method *****')
-        print('*** This may take some time depending on the number of URLS to look up')
+        self.logger.info('***** Running api_lookup() method *****')
+        self.logger.info('*** This may take some time depending on the number of URLS to look up')
 
         # This is all a bit messy from the origin function.
         # Would be good to clean this up at some point.
@@ -269,7 +284,7 @@ class survey:
  
         self.unique_pages = pd.concat([self.unique_pages, org_sect], axis = 1)
         
-        print('*** Lookup complete, merging results back into survey.data')
+        self.logger.info('*** Lookup complete, merging results back into survey.data')
 
         self.data = pd.merge(right = self.data.drop(['org','section'], axis=1), left = self.unique_pages, on='page', how='outer')
 
@@ -279,7 +294,7 @@ class survey:
 
     def trainer(self, classes = None):
 
-        print('***** Running trainer method *****')
+        self.logger.info('***** Running trainer method *****')
 
         if classes == None:
             classes = ['ok']
@@ -320,13 +335,13 @@ class survey:
             self.cleaned.drop('respondent_ID', axis=1, inplace=True)            
 
         except Exception as e:
-            print('There was an error while running trainer method')
-            print('Original error message:')
-            print(repr(e))
+            self.logger.info('There was an error while running trainer method')
+            self.logger.info('Original error message:')
+            self.logger.info(repr(e))
 
     def predictor(self):
 
-        print('***** Running predictor method *****')
+        self.logger.info('***** Running predictor method *****')
 
         try:
 
@@ -334,7 +349,7 @@ class survey:
             self.cleaned = self.data[self.selection]
             self.cleaned = self.cleaned.dropna(how = 'any')
 
-# Debug            print(self.cleaned.isnull().sum())
+# Debug            self.logger.info(self.cleaned.isnull().sum())
 
             le = LabelEncoder()
 
@@ -344,26 +359,16 @@ class survey:
             self.cleaned.drop('respondent_ID', axis=1, inplace=True)            
 
         except Exception as e:
-            print('There was an error while subsetting survey data')
-            print('Original error message:')
-            print(repr(e))
+            self.logger.info('There was an error while subsetting survey data')
+            self.logger.info('Original error message:')
+            self.logger.info(repr(e))
 
-    raw_mapping = {
-            "UserID" : "respondent_id",
-            "Tracking.Link" : "collector_id",
-            "Started" : "start_date",
-            "Ended" : "end_date",
-            "Page.Path" : "full_url",
-            "Q1..Are.you.using.GOV.UK.for.professional.or.personal.reasons.":"cat_work_or_personal",
-            "Q2..What.kind.of.work.do.you.do.":"comment_what_work",
-            "Q3..Describe.why.you.came.to.GOV.UK.todayPlease.do.not.include.personal.or.financial.information..eg.your.National.Insurance.number.or.credit.card.details.":"comment_why_you_came",
-            "Q4..Have.you.found.what.you.were.looking.for." :"cat_found_looking_for",
-            "Q5..Overall..how.did.you.feel.about.your.visit.to.GOV.UK.today." : "cat_satisfaction",
-            "Q5.1..." : "cat_satisfaction",
-            "Q6..Have.you.been.anywhere.else.for.help.with.this.already.":"cat_anywhere_else_help",
-            "Q7..Where.did.you.go.for.help.":"comment_where_for_help",
-            "Q8..If.you.wish.to.comment.further..please.do.so.here.Please.do.not.include.personal.or.financial.information..eg.your.National.Insurance.number.or.credit.card.details.":"comment_further_comments"
-    }
+    raw_columns = ["respondent_id", "collector_id", "start_date", "end_date", "full_url",
+            "cat_work_or_personal", "comment_what_work", "comment_why_you_came", "cat_found_looking_for",
+            "comment_other_found_what", "cat_satisfaction", "comment_other_where_for_help",
+            "cat_anywhere_else_help", "comment_other_else_help", "comment_where_for_help",
+            "comment_further_comments"]
+
 
     categories = [
         # May be necessary to include date columns at some juncture  
@@ -418,9 +423,9 @@ def string_len(x):
         x = (x - x.mean()) / (x.max() - x.min())
                
     except Exception as e:
-        print('There was an error converting strings to string length column!')
-        print('Original error message:')
-        print(repr(e))
+        self.logger.info('There was an error converting strings to string length column!')
+        self.logger.info('Original error message:')
+        self.logger.info(repr(e))
     return(x)
 
 def string_capsratio(x):
@@ -431,9 +436,9 @@ def string_capsratio(x):
             x = 0
 
     except Exception as e:
-        print('There was an error creating capitals ratio on column: ' + x)
-        print('Original error message:')
-        print(repr(e))
+        self.logger.info('There was an error creating capitals ratio on column: ' + x)
+        self.logger.info('Original error message:')
+        self.logger.info(repr(e))
     return(x)
 
 def string_nexcl(x):
@@ -444,9 +449,9 @@ def string_nexcl(x):
             x = 0
 
     except Exception as e:
-        print('There was an error creating n of exclamations on column: ' + x)
-        print('Original error message:')
-        print(repr(e))
+        self.logger.info('There was an error creating n of exclamations on column: ' + x)
+        self.logger.info('Original error message:')
+        self.logger.info(repr(e))
     return(x)
     
 def clean_date(x, format=None):
@@ -454,9 +459,9 @@ def clean_date(x, format=None):
         x = pd.to_datetime(x, format=format)
                
     except Exception as e:
-        print('There was an error cleaning the StartDate column!')
-        print('Original error message:')
-        print(repr(e))
+        self.logger.info('There was an error cleaning the StartDate column!')
+        self.logger.info('Original error message:')
+        self.logger.info(repr(e))
     return(x)
 
 def date_features(x):
@@ -472,9 +477,9 @@ def date_features(x):
              })
         
     except Exception as e:
-        print('There was an error creating date feature: ' + x)
-        print('Original error message:')
-        print(repr(e))
+        self.logger.info('There was an error creating date feature: ' + x)
+        self.logger.info('Original error message:')
+        self.logger.info(repr(e))
     return(X)
 
 def clean_category(x):
@@ -489,9 +494,9 @@ def clean_category(x):
         x = x.astype('category')
         
     except Exception as e:
-        print('There was an error cleaning the', x ,'column.')
-        print('Original error message:')
-        print(repr(e))
+        self.logger.info('There was an error cleaning the', x ,'column.')
+        self.logger.info('Original error message:')
+        self.logger.info(repr(e))
     return(x)
 
 def clean_comment(x):
@@ -507,9 +512,9 @@ def clean_comment(x):
         x = x.fillna('none')
         
     except Exception as e:
-        print('There was an error cleaning the', x ,'column.')
-        print('Original error message:')
-        print(repr(e))
+        self.logger.info('There was an error cleaning the', x ,'column.')
+        self.logger.info('Original error message:')
+        self.logger.info(repr(e))
     return(x)
       
 def clean_code(x, levels):
@@ -535,9 +540,9 @@ def clean_code(x, levels):
             x = x.astype('category')
         
     except Exception as e:
-        print('There was an error cleaning the', x ,'column.')
-        print('Original error message:')
-        print(repr(e))
+        self.logger.info('There was an error cleaning the', x ,'column.')
+        self.logger.info('Original error message:')
+        self.logger.info(repr(e))
     return(x)
 
 #stops = set(stopwords.words("english"))     # Creating a set of Stopwords
@@ -572,7 +577,7 @@ def lookup(r,page,index):
         elif page == 'organisations':
             x = r['results'][0][page][index]['title']
         else:
-            print('page argument must be one of "organisations" or "mainstream_browse_pages"')
+            self.logger.info('page argument must be one of "organisations" or "mainstream_browse_pages"')
             sys.exit(1)
     except (IndexError, KeyError) as e:
         x = 'null'
@@ -585,7 +590,7 @@ def get_org(x):
 
     url = "https://www.gov.uk/api/search.json?filter_link[]=%s&fields=organisations&fields=mainstream_browse_pages" % x
     
-    #print('Looking up ' + url)
+    #self.logger.info('Looking up ' + url)
     
     try:
        
@@ -620,8 +625,8 @@ def get_org(x):
         return(row)
 
     except Exception as e:
-        print('Error looking up ' + url)
-        print('Returning "none"')
+        self.logger.info('Error looking up ' + url)
+        self.logger.info('Returning "none"')
         row = ['none'] * 9
         return(row)
 
