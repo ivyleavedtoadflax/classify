@@ -33,6 +33,7 @@ class survey(object):
         self.unique_pages = pd.DataFrame()
         self.org_sect = pd.DataFrame()
         self.cleaned = pd.DataFrame()
+        self.encoder = LabelEncoder()
 
     def load(self, path):
         """
@@ -65,12 +66,12 @@ class survey(object):
         # Run check on the incoming columns against expected
         try:
 
-            assert set(self.raw.columns) == set(self.raw_columns)
+            assert set(self.raw.columns) == set(self.raw_mapping.values())
 
         except AssertionError:
             self.logger.error('Incorrect columns in %s:', path)
-            self.logger.error('Expected: %s,\n Received: %s',
-                              set(self.raw.columns), set(self.raw_columns))
+            self.logger.error('Expected:\n%s\nReceived:\n%s',
+                              set(self.raw.columns), set(self.raw_mapping.values()))
             raise
 
         self.logger.info('Shape of %s: %s', path, self.raw.shape)
@@ -109,22 +110,22 @@ class survey(object):
 
         # Subset columns mentioned in mapping dict
 
-        #cols = list(self.raw_mapping.values())
+        cols = list(self.raw_mapping.values())
         
-        # Strip down only to the columns listed in raw.mapping - append code1 here
+        # Strip down only to the columns listed in raw.mapping - append target here
         # as it should always now be present in the data.    
         
-        #cols.extend(['code1'])
+        cols.extend(['target'])
         
         # NOTE: in 0.5.6> this functionality is not used, because in the .load method,
         # the incoming columns are checked against raw_columns, which does not contain
-        # code1.
+        # target.
 
-        # Check here: if code1 is not in the raw data, i.e. we are predicting, not
+        # Check here: if target is not in the raw data, i.e. we are predicting, not
         # training, then add the column to the dataframe.
 
-        #if 'code1' not in self.data.columns.tolist():
-        #    self.data['code1'] = str()            
+        if 'target' not in self.data.columns.tolist():
+            self.data['target'] = str()            
         
         # NOTE: This step of dropping additional columns, is not required here.
 
@@ -160,7 +161,7 @@ class survey(object):
 
         #no_comments = (self.data['comment_further_comments'] == 'none') & (self.data['comment_where_for_help'] == 'none') & (self.data['comment_other_where_for_help'] == 'none') & (self.data['comment_why_you_came'] == 'none')
 
-        #self.data.loc[no_comments,'code1'] = 'none'
+        #self.data.loc[no_comments,'target'] = 'none'
 
         # Features on column names
 
@@ -389,7 +390,7 @@ class survey(object):
         self.data.drop_duplicates(subset=['respondent_id'], inplace=True)
         self.logger.info('Shape after dropping duplicates:\n%s', self.data.shape)
 
-    # Define code to encode to true (defualt to ok)
+    # Define target to encode to true (defualt to ok)
 
     def trainer(self, classes=None):
         """
@@ -400,50 +401,50 @@ class survey(object):
 
         if classes is None:
             classes = ['ok']
-            
+
         try:
             self.cleaned = self.data.copy()
             self.cleaned = self.data[self.selection + self.codes]
-            self.cleaned = self.cleaned.dropna(how = 'any')
-            
-            # There is an argument for doing this in the .clean() method.
+            self.cleaned = self.cleaned.dropna(how='any')
+
+            # TODO: There is an argument for doing this in the .clean() method.
             # It might useful to be able to call the data before this is
             # applied however. Note that after running load(), clean(),
             # trainer() there are now three similar copies of the data being
             # stored within the class object. At the present small scale this
-            # is not a problem, but in time it may be necessary to readress 
+            # is not a problem, but in time it may be necessary to readress
             # this.
-            
+
             # LabelEncoder converts labels into numeric codes for all of the factors.
 
-            le = LabelEncoder()
-
             for col in self.categories:
-                self.cleaned.loc[:,col] = le.fit_transform(self.cleaned.loc[:,col])
-            
-            le.fit(self.cleaned['code1'])
-            self.cleaned['code1'] = le.transform(self.cleaned['code1'])
+                self.cleaned.loc[:, col] = self.encoder.fit_transform(self.cleaned.loc[:,col])
+
+            self.encoder.fit(self.cleaned['target'])
+            self.cleaned['target'] = self.encoder.transform(self.cleaned['target'])
 
             # At present this deals only with the binary case. Would be
             # good to generalise this in future to allow it to be customised.
             # This codes the outcomes as 0 or 1, but ideall would do 0, 1, 2, etc.
 
-            self.bin_true = le.transform(classes)
+            bin_true = self.encoder.transform(classes)
 
-            self.cleaned['code1'] = [1 if x in self.bin_true else 0 for x in self.cleaned['code1']] 
-            #self.cleaned.loc[self.cleaned['code1'] not in self.bin_true,'code1'] = 0
-            #self.cleaned.loc[self.cleaned['code1'] in self.bin_true,'code1'] = 1
+            self.cleaned['code'] = [1 if x in bin_true else 0 for x in self.cleaned['code']]
+            #self.cleaned.loc[self.cleaned['code'] not in self.bin_true,'code'] = 0
+            #self.cleaned.loc[self.cleaned['code'] in self.bin_true,'code'] = 1
 
-            self.cleaned.drop('respondent_ID', axis=1, inplace=True)            
+            self.cleaned.drop('respondent_id', axis=1, inplace=True)
 
-        except Exception as e:
-            self.logger.info('There was an error while running trainer method')
-            self.logger.info('Original error message:')
-            self.logger.info(repr(e))
+        except Exception:
+            self.logger.error('Error while running trainer method')
+            raise
 
     def predictor(self):
+        """
+        Prepare data for prediction using a pre-trained model
+        """
 
-        self.logger.info('***** Running predictor method *****')
+        self.logger.info('Running predictor method')
 
         try:
 
@@ -453,10 +454,8 @@ class survey(object):
 
 # Debug            self.logger.info(self.cleaned.isnull().sum())
 
-            le = LabelEncoder()
-
             for col in self.categories:
-                self.cleaned.loc[:,col] = le.fit_transform(self.cleaned.loc[:,col])
+                self.cleaned.loc[:,col] = self.econder.fit_transform(self.cleaned.loc[:,col])
 
             self.cleaned.drop('respondent_ID', axis=1, inplace=True)            
 
@@ -465,12 +464,26 @@ class survey(object):
             self.logger.info('Original error message:')
             self.logger.info(repr(e))
 
-    raw_columns = ["respondent_id", "collector_id", "start_date", "end_date", "full_url",
-            "cat_work_or_personal", "comment_what_work", "comment_why_you_came", "cat_found_looking_for",
-            "comment_other_found_what", "cat_satisfaction", "comment_other_where_for_help",
-            "cat_anywhere_else_help", "comment_other_else_help", "comment_where_for_help",
-            "comment_further_comments"]
 
+    raw_mapping = {
+        'UserID':'respondent_id',
+        'Started':'start_date',
+        'Ended': 'end_date',
+        'Page Path':'full_url',
+        'Unique ID':'collector_id',
+#        'Tracking Link':'tracking_link',
+        'Q1. Are you using GOV.UK for professional or personal reasons?':'cat_work_or_personal',
+        'Q2. What kind of work do you do?':'comment_what_work',
+        'Q3. Describe why you came to GOV.UK todayPlease do not include personal or financial information, eg your National Insurance number or credit card details.':'comment_why_you_came',
+        'Q4. Have you found what you were looking for?':'cat_found_looking_for',
+        'Q5.1.':'cat_satisfaction',
+       'Q6. Have you been anywhere else for help with this already?':'cat_anywhere_else_help',
+        'Q7. Where did you go for help?':'comment_where_for_help',
+        'Q8. If you wish to comment further, please do so here.Please do not include personal or financial information, eg your National Insurance number or credit card details.':'comment_further_comments',
+    'Unnamed: 13':'comment_other_found_what',
+    'Unnamed: 17':'comment_other_else_help',
+    'dummy':'comment_other_where_for_help'
+    }
 
     categories = [
         # May be necessary to include date columns at some juncture  
@@ -486,7 +499,7 @@ class survey(object):
     ]
     
     codes = [
-        'code1'
+        'target'
     ]
     
     # Could do some fuzzy matching here to improve matching to category names
@@ -500,7 +513,7 @@ class survey(object):
     'address-problem', 'verify'
     ]
 
-    selection = ['respondent_ID', 'weekday', 'day', 'week', 'month', 'year', 'time_delta'] + categories + [(x + '_len') for x in comments] + [(x + '_nexcl') for x in comments] + [(x + '_capsratio') for x in comments]
+    selection = ['respondent_id', 'weekday', 'day', 'week', 'month', 'year', 'time_delta'] + categories + [(x + '_len') for x in comments] + [(x + '_nexcl') for x in comments] + [(x + '_capsratio') for x in comments]
 
 def drop_sub(x):
     if x.iloc[0,].str.match('Open-Ended Response').sum():
