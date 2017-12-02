@@ -6,23 +6,33 @@ wrangling data from the govuk intent survey.
 
 import re
 import sys
-import os.path
+import time
+import requests
+import logging
+import logging.config
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
-import logging
-import logging.config
 
 class survey(object):
     """Class for handling intents surveys from google sheets"""
 
-    def __init__(self, logger):
-        self.logger = logger
+    def __init__(self):
+        """
+        Instantiate the class
+
+        Expects a logging object to have been created in the 
+        script executing the class.
+        """
+
+        self.logger = logging.getLogger("classifyintents")
         self.logger.info('Instantiated survey class')
 
         self.raw = pd.DataFrame()
         self.data = pd.DataFrame()
         self.unique_pages = pd.DataFrame()
+        self.org_sect = pd.DataFrame()
+        self.cleaned = pd.DataFrame()
 
     def load(self, path):
         """
@@ -59,24 +69,25 @@ class survey(object):
 
         except AssertionError:
             self.logger.error('Incorrect columns in %s:', path)
-            self.logger.error('Expected: %s,\n Received: %s', 
+            self.logger.error('Expected: %s,\n Received: %s',
                               set(self.raw.columns), set(self.raw_columns))
             raise
 
         self.logger.info('Shape of %s: %s', path, self.raw.shape)
         self.raw.dropna(subset=['respondent_id'], inplace=True)
 
-        self.logger.info('Shape of %s after dropping missing respondent_ids %s', path, self.raw.shape)
-        
+        self.logger.info('Shape of %s after dropping missing respondent_ids %s', 
+                         path, self.raw.shape)
+
         # Convert respondent_id to int.
 
         self.raw['respondent_id'] = self.raw['respondent_id'].astype('int')
         self.logger.debug('%s', self.raw.dtypes)
-            
+
         # Define mappings and columns used in iterators
 
         # Clean date columns
-        
+
     def clean_raw(self, date_format=None):
 
         self.logger.info('Running clean_raw method')
@@ -92,7 +103,7 @@ class survey(object):
         # Use mapping to rename and subset columns
 
         #self.data.rename(columns = self.raw_mapping, inplace=True)
-        
+
         # NOTE: in 0.5.6> In the assertion in the .load method we assume that the right
         # columns are passed, so no columns need to be dropped here.
 
@@ -296,59 +307,98 @@ class survey(object):
                          str(len(self.unique_pages['page'])))
 
 
-    def api_lookup(self):
+    def api_lookup(self, wait=0.1):
+        """
+        Perform a lookup using the GOV.UK content API
+        """
+        # NOTE: Future versions could use github.com/ukgovdatascience/govukurllookup
 
-        # Run the api lookup, then subset the return (we're not really interested in most of what we get back)
-        # then merge this back into self.data, using 'page' as the merge key.
+        # Run the api lookup, then subset the return (we're not really interested
+        # in most of what we get back) then merge this back into self.data, using
+        # 'page' as the merge key.
 
-        self.logger.info('***** Running api_lookup() method *****')
-        self.logger.info('*** This may take some time depending on the number of URLS to look up')
+        self.logger.info('Running api_lookup() method')
+        self.logger.info('Looking up %s urls', self.unique_pages.shape[0])
+
+        # Only run the lookup on cases where we have not already set an org and section
+
+        org_sect = []
+        for i, page in enumerate(self.unique_pages['page']):
+
+            total = self.unique_pages.shape[0]
+
+            if i % 50 == 0:
+
+                self.logger.info('Looking up page %s/%s', i, total)
+
+            response = get_org(page)
+            org_sect.append(response)
+
+            # NOTE: as of 2017-12-02 I have experienced difficulties running the API lookup
+            # from a laptop not connected to the VPN. Introduce a pause here to reduce the
+            # rate of requests being sent to the API. There is no logic to the size of this
+            # sleep.
+
+            time.sleep(wait)
+
+        self.logger.debug('First five entries of org_sect list:\n%s', org_sect[0:5])
 
         # This is all a bit messy from the origin function.
         # Would be good to clean this up at some point.
-        
-        column_names = ['organisation0',
-                        'organisation1',
-                        'organisation2',
-                        'organisation3',
-                        'organisation4',
-                        'section0',
-                        'section1',
-                        'section2',
-                        'section3']
-        
-        # Only run the lookup on cases where we have not already set an org and section
-                   
-       # self.org_sect = [get_org(i) for i in self.data.loc[((self.data.section == 'nan') &(self.data.org == 'nan')),['page']]]
-        self.org_sect = [get_org(i) for i in self.unique_pages['page']]
-        self.org_sect = pd.DataFrame(self.org_sect, columns=column_names)
+
+        column_names = ['organisation0', 'organisation1', 'organisation2',
+                        'organisation3', 'organisation4', 'section0', 'section1',
+                        'section2', 'section3']
+
+        self.org_sect = pd.DataFrame(org_sect, columns=column_names)
         self.org_sect = self.org_sect.set_index(self.unique_pages.index)
- 
-        # Convert any NaNs to none, so they are not dropped when self.trainer/predictor is run
-        
+
+        self.logger.info('Finished API lookup')
+        self.logger.info('org_sect shape: %s: self.org_sect.shape')
+
+        # Convert any NaNs to none, so they are not dropped when
+        # self.trainer/predictor is run
+
         self.org_sect['organisation0'].replace(np.nan, 'none', regex=True, inplace=True)
-        self.org_sect['section0'].replace(np.nan, 'none', regex=True, inplace=True)   
+        self.org_sect['section0'].replace(np.nan, 'none', regex=True, inplace=True)
 
         # Retain the full lookup, but only add a subset of it to the clean dataframe
 
-        org_sect = self.org_sect[['organisation0','section0']]
-        org_sect.columns = ['org','section']
- 
-        self.unique_pages = pd.concat([self.unique_pages, org_sect], axis = 1)
-        
-        self.logger.info('*** Lookup complete, merging results back into survey.data')
+        org_sect = self.org_sect[['organisation0', 'section0']]
+        org_sect.columns = ['org', 'section']
 
-        self.data = pd.merge(right = self.data.drop(['org','section'], axis=1), left = self.unique_pages, on='page', how='outer')
+        # Merge the unique_pages dataframe with the org_sect lookup dataframe
 
-        self.data.drop_duplicates(subset=['respondent_ID'],inplace=True)
-     
+        self.unique_pages = pd.concat([self.unique_pages, org_sect], axis=1)
+
+        self.logger.info('Lookup complete, merging results back into survey.data')
+        self.logger.debug('unique_pages.head:\n%s', self.unique_pages.head())
+
+        self.data = pd.merge(right=self.data.drop(['org', 'section'], axis=1),
+                             left=self.unique_pages, on='page', how='outer',
+                             indicator=True)
+
+        self.logger.info('Merged data shape is:\n%s', self.data.shape)
+        self.logger.debug('Merged data head is:\n%s', self.data.head())
+        self.logger.debug('Merged data columns is:\n%s', self.data.columns)
+        self.logger.debug('data merge success:\n%s', self.data['_merge'].value_counts())
+        self.logger.debug('Top five right_only:\n%s',
+                          self.data[self.data['_merge'] == 'right_only'][0:5])
+
+        self.logger.info('Shape before dropping duplicates:\n%s', self.data.shape)
+        self.data.drop_duplicates(subset=['respondent_id'], inplace=True)
+        self.logger.info('Shape after dropping duplicates:\n%s', self.data.shape)
+
     # Define code to encode to true (defualt to ok)
 
-    def trainer(self, classes = None):
+    def trainer(self, classes=None):
+        """
+        Prepare the data for training
+        """
 
         self.logger.info('***** Running trainer method *****')
 
-        if classes == None:
+        if classes is None:
             classes = ['ok']
             
         try:
@@ -578,7 +628,7 @@ def clean_code(x, levels):
         if not pd.isnull(x).sum() == len(x):        
             x = x.str.strip()
             x = x.str.lower()
-            x = x.replace('\_', '\-', regex=True)
+            x = x.replace(r'\_', r'\-', regex=True)
         
             # Rules for fixing random errors.
             # Commented out for now 
@@ -597,29 +647,6 @@ def clean_code(x, levels):
         self.logger.info(repr(e))
     return(x)
 
-#stops = set(stopwords.words("english"))     # Creating a set of Stopwords
-#p_stemmer = PorterStemmer() 
-#
-#def concat_ngrams(x):
-#    #if len(x) > 1 & isinstance(x, list):
-#    if isinstance(x, tuple):
-#        x = '_'.join(x)
-#    return(x)
-#
-#def cleaner(row):
-#    
-#    # Function to clean the text data and prep for further analysis
-#    text = row.lower()                      # Converts to lower case
-#    text = re.sub("[^a-zA-Z]"," ",text)          # Removes punctuation
-#    text = text.split()                          # Splits the data into individual words 
-#    text = [w for w in text if not w in stops]   # Removes stopwords
-#    text = [p_stemmer.stem(i) for i in text]     # Stemming (reducing words to their root)
-#    text3 = list(ngrams(text, 2))
-#    text2 = list(ngrams(text, 3))
-#    text = text + text2 + text3
-#    text = list([concat_ngrams(i) for i in text])
-#    return(text)  
-
 ## Functions dealing with the API lookup
 
 def lookup(r,page,index):        
@@ -635,52 +662,57 @@ def lookup(r,page,index):
         x = 'null'
     return(x)
 
-def get_org(x):
-    
+def get_org(page):
+    """
+    Perform lookup against the GOV.UK Content API
+    """
+
     # argument x should be pd.Series of full length urls
     # Loop through each entry in the series
 
-    url = "https://www.gov.uk/api/search.json?filter_link[]=%s&fields=organisations&fields=mainstream_browse_pages" % x
-    
+    url = ("https://www.gov.uk/api/search.json?filter_link[]"
+           "=%s&fields=organisations&fields=mainstream_browse_pages" % page)
+
     #self.logger.info('Looking up ' + url)
-    
+
     try:
-       
+
         #url = "https://www.gov.uk/api/search.json?filter_link[]=%s&fields=y" % (x, y)
 
         # read JSON result into r
         r = requests.get(url).json()
 
-        # chose the fields you want to scrape. This scrapes the first 5 instances of organisation, error checking as it goes
+        # chose the fields you want to scrape. This scrapes the first 5 
+        # instances of organisation, error checking as it goes
         # this exception syntax might not work in Python 3
 
-        organisation0 = lookup(r,'organisations', 0)
-        organisation1 = lookup(r,'organisations', 1)
-        organisation2 = lookup(r,'organisations', 2)
-        organisation3 = lookup(r,'organisations', 3)
-        organisation4 = lookup(r,'organisations', 4)
-        section0 = lookup(r,'mainstream_browse_pages', 0)
-        section1 = lookup(r,'mainstream_browse_pages', 1)
-        section2 = lookup(r,'mainstream_browse_pages', 2)
-        section3 = lookup(r,'mainstream_browse_pages', 3)
+        organisation0 = lookup(r, 'organisations', 0)
+        organisation1 = lookup(r, 'organisations', 1)
+        organisation2 = lookup(r, 'organisations', 2)
+        organisation3 = lookup(r, 'organisations', 3)
+        organisation4 = lookup(r, 'organisations', 4)
+        section0 = lookup(r, 'mainstream_browse_pages', 0)
+        section1 = lookup(r, 'mainstream_browse_pages', 1)
+        section2 = lookup(r, 'mainstream_browse_pages', 2)
+        section3 = lookup(r, 'mainstream_browse_pages', 3)
 
         row = [organisation0,
-                organisation1,
-                organisation2,
-                organisation3,
-                organisation4,
-                section0,
-                section1,
-                section2,
-                section3]
-        
-        return(row)
+               organisation1,
+               organisation2,
+               organisation3,
+               organisation4,
+               section0,
+               section1,
+               section2,
+               section3]
+
+        return row
 
     except Exception as e:
         self.logger.info('Error looking up ' + url)
         self.logger.info('Returning "none"')
         row = ['none'] * 9
-        return(row)
+        return row
 
 ## Functions dealing with developing a time difference feature
 
