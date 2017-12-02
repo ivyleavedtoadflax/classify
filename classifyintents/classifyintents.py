@@ -20,6 +20,9 @@ class survey(object):
         self.logger = logger
         self.logger.info('Instantiated survey class')
 
+        self.raw = pd.DataFrame()
+        self.data = pd.DataFrame()
+
     def load(self, path):
         """
         Load the data from csv file
@@ -43,7 +46,7 @@ class survey(object):
         except FileNotFoundError:
             self.logger.exception('Input file %s does not exist', path)
             raise
-            
+
         except:
             self.logger.error('Unexpected error loading raw data from file %s', path)
             raise
@@ -55,7 +58,8 @@ class survey(object):
 
         except AssertionError:
             self.logger.error('Incorrect columns in %s:', path)
-            self.logger.error('Expected: %s,\n Received: %s', set(self.raw.columns), set(self.raw_columns))
+            self.logger.error('Expected: %s,\n Received: %s', 
+                              set(self.raw.columns), set(self.raw_columns))
             raise
 
         self.logger.info('Shape of %s: %s', path, self.raw.shape)
@@ -66,6 +70,7 @@ class survey(object):
         # Convert respondent_id to int.
 
         self.raw['respondent_id'] = self.raw['respondent_id'].astype('int')
+        self.logger.debug('%s', self.raw.dtypes)
             
         # Define mappings and columns used in iterators
 
@@ -73,48 +78,71 @@ class survey(object):
         
     def clean_raw(self, date_format=None):
 
-        self.logger.info('***** Running clean_raw method *****')
-        self.logger.info('*** The cleaned data are stored in survey.data')
+        self.logger.info('Running clean_raw method')
+        self.logger.info('The cleaned data are stored in survey.data')
 
         self.data = self.raw.copy()
 
+        # NOTE: in 0.5.6> it is assumed that this process is being done
+        # prior to the data being loaded by the survey class. It would
+        # be good to do the process here, but for now, assume that it is
+        # being done prior to loading.
+
         # Use mapping to rename and subset columns
 
-        self.data.rename(columns = self.raw_mapping, inplace=True)
+        #self.data.rename(columns = self.raw_mapping, inplace=True)
+        
+        # NOTE: in 0.5.6> In the assertion in the .load method we assume that the right
+        # columns are passed, so no columns need to be dropped here.
 
         # Subset columns mentioned in mapping dict
 
-        cols = list(self.raw_mapping.values())
+        #cols = list(self.raw_mapping.values())
         
         # Strip down only to the columns listed in raw.mapping - append code1 here
         # as it should always now be present in the data.    
         
-        cols.extend(['code1'])
+        #cols.extend(['code1'])
+        
+        # NOTE: in 0.5.6> this functionality is not used, because in the .load method,
+        # the incoming columns are checked against raw_columns, which does not contain
+        # code1.
 
         # Check here: if code1 is not in the raw data, i.e. we are predicting, not
         # training, then add the column to the dataframe.
 
-        if 'code1' not in self.data.columns.tolist():
-            self.data['code1'] = str()            
+        #if 'code1' not in self.data.columns.tolist():
+        #    self.data['code1'] = str()            
         
-        self.data = self.data[cols]
+        # NOTE: This step of dropping additional columns, is not required here.
+
+        #self.data = self.data[cols]
         
-# Arrange date features
+        # Arrange date features
 
         self.data['start_date'] = clean_date(self.data['start_date'], date_format)
         self.data['end_date'] = clean_date(self.data['end_date'], date_format)
-        
+
+        self.logger.info('Added date features: start_date and end_date')
+        self.logger.debug("Head of data['start_date']: %s", self.data['start_date'].head())
+        self.logger.debug("Head of data['end_date']: %s", self.data['start_date'].head())
+
         # Create time delta and normalise
 
         self.data['time_delta'] = time_delta(self.data['end_date'], self.data['start_date'])
-         
         self.data['time_delta'] = normalise(self.data['time_delta'])
 
+        self.logger.info('Added date feature: time_delta')
+        self.logger.debug("Head of data['time_delta']: %s", self.data['time_delta'].head())
+
+        # Combine new date features with existing features.
+        # Prepare org and section features for population from API lookup.
+
         self.data = pd.concat([
-             pd.DataFrame(columns=['org','section']),date_features(self.data['start_date']), self.data],
-            axis = 1
-        )
-        
+            pd.DataFrame(columns=['org', 'section']),
+            date_features(self.data['start_date']),
+            self.data], axis=1)
+
         # Classify all empty relevant comments as 'none'. This has been moved out of the class!
         # Need to have a think about whether this should be in the class or not!
 
@@ -126,13 +154,18 @@ class survey(object):
 
         try:
             for col in self.data:
-                
+
                 # Is the column entirely NaN?
-                # Currently this is only implemented for comment columns
-                # May make sense to do this for all column types...
-                
+                # NOTE: Currently this is only implemented for comment columns
+                # It may make sense to do this for all column types, though it is
+                # less likely that these columns will be empty.
+
                 all_null = (self.data[col].isnull().sum() == len(self.data[col]))
-                
+                if all_null:
+
+                    self.logger.info('%s column is all empty', col)
+                    self.logger.debug('head of %s column: \n%s', col, self.data[col].head())
+
                 # Start by cleaning the categorical variables
 
                 if col in self.categories:
@@ -146,22 +179,26 @@ class survey(object):
                     self.data[col + '_len'] = string_len(self.data[col])
                     self.data[col] = clean_comment(self.data[col])
 
+                    self.logger.info('Added string features to %s', col)
+                    self.logger.debug('head of %s column: \n%s',
+                                      col + '_capsratio', self.data[col + '_capsratio'].head())
+
+                # If the column is all null, just return zeros.
+
                 elif 'comment' in col and all_null:
                     self.data[col + '_capsratio'] = 0
                     self.data[col + '_nexcl'] = 0
                     self.data[col + '_len'] = 0
                     self.data[col] = 'none'
 
-                # Finally clean the outcome codes
-
-                #elif col in self.codes:
-                #    self.data[col] = clean_code(self.data[col], self.code_levels)
-        except: 
-            self.logger.info('Error cleaning ' + col + ' column')
-            self.logger.info('Original error message:', sys.exc_info()[0])
+        except:
+            self.logger.error('Error cleaning %s column', col)
             raise
 
     def clean_urls(self):
+        """
+        Extract additional features from the gov.uk content API
+        """
 
         self.logger.info('***** Running clean_urls() method *****')
 
