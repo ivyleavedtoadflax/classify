@@ -119,7 +119,7 @@ class survey:
 
         # NOTE: the 'comment_other_where_for_help' column is no longer contained
         # in smartsurvey data, but is a required feature for the older models.
-        # Add it in here while there is a reliance on the older models, but in 
+        # Add it in here while there is a reliance on the older models, but in
         # future it can be happily removed.
 
         self.data['comment_other_where_for_help'] = np.nan
@@ -182,30 +182,35 @@ class survey:
         try:
             for col in self.data:
 
-                # Is the column entirely NaN?
-                # NOTE: Currently this is only implemented for comment columns
-                # It may make sense to do this for all column types, though it is
-                # less likely that these columns will be empty.
-
-                all_null = (self.data[col].isnull().sum() == len(self.data[col]))
-                if all_null:
-
-                    self.logger.info('%s column is all empty', col)
-                    self.logger.debug('head of %s column: \n%s', col, self.data[col].head())
-
                 # Start by cleaning the categorical variables
 
-                if col in self.categories:
-                    self.data[col] = clean_category(self.data[col])
+                # Is the column entirely NaN or 'none'?
+                # NOTE: 'none' is the class that codes for empty. Setting it to
+                # NaN or None would result in these rows being dropped from the
+                # data. That it is empty is an importat feature in itself.
 
+                all_null = self.data[col].isnull().sum() == len(self.data[col])
+#                all_none = (self.data[col] == 'none').sum() == len(self.data[col])
+
+#                self.logger.debug('Does %s contain all nulls?\n%s', col, all_null)
+#                self.logger.debug('Does %s contain all nones?\n%s', col, all_none)
+
+#                mask = any([all_null, all_none])
+
+                self.data[col] = clean_category(self.data[col])
                 # Now clean the comment variables
 
-                elif 'comment' in col and not all_null:
+                if 'comment' in col and not all_null:
                     self.data[col + '_capsratio'] = [string_capsratio(x) for x in self.data[col]]
                     self.data[col + '_nexcl'] = [string_nexcl(x) for x in self.data[col]]
+                    self.logger.debug('self.data[%s]:\n%s', col, self.data[col])
+                    self.logger.debug('self.data[%s]:\n%s', col, self.data[col].dtype)
+
                     self.data[col + '_len'] = string_len(self.data[col])
                     self.data[col] = clean_comment(self.data[col])
-                    self.logger.debug('self.data[%s]:\n%s', col, 
+
+                    # Some issues with the string_len function exposed here in debug
+                    self.logger.debug('self.data[%s]:\n%s', col,
                                       pd.concat([self.data[col], self.data[col + '_len']], axis=1))
 
                     self.logger.info('Added string features to %s', col)
@@ -219,6 +224,8 @@ class survey:
                     self.data[col + '_nexcl'] = 0
                     self.data[col + '_len'] = 0
                     self.data[col] = 'none'
+
+            self.logger.debug('\n%s', self.data.columns)
 
         except:
             self.logger.error('Error cleaning %s column', col)
@@ -483,6 +490,7 @@ class survey:
 
         try:
 
+            self.logger.debug(self.data.columns)
             self.cleaned = self.data.copy()
             self.cleaned = self.data[self.selection]
 
@@ -495,8 +503,7 @@ class survey:
 
             self.cleaned = self.cleaned.dropna(how='any')
 
-            self.logger.info('cleaned shape after dropping:\n%s',
-                             self.cleaned.shape)
+            self.logger.info('cleaned shape after dropping: %s', self.cleaned.shape)
 
             for col in self.categories:
 
@@ -539,9 +546,9 @@ class survey:
         'Q6. Have you been anywhere else for help with this already?':'cat_anywhere_else_help',
         'Q7. Where did you go for help?':'comment_where_for_help',
         'Q8. If you wish to comment further, please do so here.Please do not include personal or financial information, eg your National Insurance number or credit card details.':'comment_further_comments',
-        'Unnamed: 13':'comment_other_found_what',
-        'Unnamed: 17':'comment_other_else_help',
-        'dummy':'comment_other_where_for_help'
+        'comment_other_found_what':'comment_other_found_what',
+        'comment_other_else_help':'comment_other_else_help',
+        'comment_other_where_for_help':'comment_other_where_for_help'
         }
 
     categories = [
@@ -587,12 +594,22 @@ def string_len(feature):
 
         # Convert NaN to 'a'. Then when counted this will
         # be a 1. Whilst not 0, any entry with 1 is virtually
-        # meaningless, so 1 is a profeaturey for 0.
+        # meaningless, so 1 is a proxy for 0.
 
         feature = pd.Series([len(y) for y in feature.fillna('a')])
+
+        assert isinstance(feature, pd.Series)
+        assert feature.isnull().sum() == 0
+
         # Now normalise the scores
 
+        # NOTE: if normalised is all the same value, there will be division
+        # by zero issues.
+
         normalised = (feature - feature.mean()) / (feature.max() - feature.min())
+        normalised = pd.Series(normalised).fillna(0)
+
+        assert normalised.isnull().sum() == 0, normalised
 
     except Exception:
         print('There was an error converting feature to string length column')
