@@ -14,8 +14,8 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 
-class survey(object):
-    """Class for handling intents surveys from google sheets"""
+class survey:
+    """Class for handling intents surveys from Smart Survey """
 
     def __init__(self):
         """
@@ -62,6 +62,19 @@ class survey(object):
 
             self.raw = pd.read_csv(path)
 
+            # NOTE: From 0.6.1 the assumption is made that this data has been cleaned
+            # first, nomially using the R script: reformat.R
+
+            # Strip whitespace from columns to save problems later!
+            # Remove no break whitespace first.
+            
+            #self.raw.columns = [i.replace("\xa0", " ") for i in self.raw.columns]
+            #self.raw.columns = self.raw.columns.str.strip()
+            
+            # Force UserID to be integer (to prevent the addition of decimal places)
+
+            #self.raw['UserID'] = self.raw['UserID'].astype('int')
+            
         except FileNotFoundError:
             self.logger.exception('Input file %s does not exist', path)
             raise
@@ -118,15 +131,22 @@ class survey(object):
         # Subset columns mentioned in mapping dict
 
         cols = list(self.raw_mapping.values())
-
-        # Strip down only to the columns listed in raw.mapping - append target here
-        # as it should always now be present in the data.
+        
+        # Strip down only to the columns listed in raw.mapping - append code1 here
+        # as it should always now be present in the data. Also include the
+        # comment_other columns.
 
         cols.extend(['target'])
 
         # NOTE: in 0.6.1> this functionality is not used, because in the .load method,
         # the incoming columns are checked against raw_columns, which does not contain
         # target.
+
+        self.data['comment_other_found_what'] = extract_other(self.data['cat_found_looking_for'])
+        self.data['comment_other_else_help'] = extract_other(self.data['cat_anywhere_else_help'])
+        
+        self.data['cat_found_looking_for'] = rewrite_other(self.data['cat_found_looking_for'])
+        self.data['cat_anywhere_else_help'] = rewrite_other(self.data['cat_anywhere_else_help'])  
 
         # Check here: if target is not in the raw data, i.e. we are predicting, not
         # training, then add the column to the dataframe.
@@ -827,3 +847,36 @@ def reg_match(r, x, i):
     else:
         found = x
     return found
+
+# Functions to remove other categories from categorical questions following
+# switch to smart survey
+
+def extract_other(x):
+    try:
+        
+        # Weirdness with some columns being filled with just a comma.
+        # Is this due to improper handling of the csv file somewhere?        
+        x = x.fillna('none')
+        x = x.replace(r'^Yes$|^No$|^Not sure / Not yet$', 'none', regex=True)
+
+    except Exception as e:
+        print('There was an error cleaning the', x ,'column.')
+        print('Original error message:')
+        print(repr(e))
+    return(x)
+
+
+def rewrite_other(x):
+    try:
+        
+        # Weirdness with some columns being filled with just a comma.
+        # Is this due to improper handling of the csv file somewhere?        
+        x = x.fillna('none')
+        x[~x.str.match('^Yes$|^No$|^Not sure / Not yet$', na=False)] = 'other'
+
+    except Exception as e:
+        print('There was an error cleaning the', x ,'column.')
+        print('Original error message:')
+        print(repr(e))
+    return(x)
+ 

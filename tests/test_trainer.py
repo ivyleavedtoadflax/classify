@@ -50,11 +50,9 @@ class TestTrainerMethod:
 
     def test_trainer_method_converts_two_codes_correctly(self):
         
-        # There will only be ones left in code1 after running trainer()
-
         self.a.trainer(['ok','finding-general'])
 
         nt.assert_equal(
                 set(self.a.cleaned.code1.tolist()), 
-                set([1])
+                set([1,0])
                 )

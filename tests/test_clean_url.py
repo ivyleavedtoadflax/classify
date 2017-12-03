@@ -48,7 +48,7 @@ class TestCleanUrls:
     #def teardown_class(cls):
     #    print ("teardown_class() after any methods in this class")
 
-    # Test on n=198 example
+    # Test on n=196 example
 
     def test_unique_pages_is_a_dataframe(self):
     
@@ -60,7 +60,7 @@ class TestCleanUrls:
     
         nt.assert_equal(
                 len(self.b.data['full_url']),
-                198
+                196
                 )
 
     def test_unique_pages_length_is_correct(self):

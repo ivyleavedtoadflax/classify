@@ -86,9 +86,9 @@ class TestCleanRaw:
     def test_code1_value_counts_after_clean_raw_for_predicting(self):
 
         nt.assert_true(
-                sum(self.train.data.code1 == 'ok') == 23
+                sum(self.train.data.code1 == 'ok') == 39
                 )
 
         nt.assert_true(
-                sum(self.train.data.code1 == 'finding-general') == 175
+                sum(self.train.data.code1 == 'finding-general') == 29
                 )
