@@ -567,7 +567,8 @@ def string_len(feature):
         feature = feature.str.lower()
 
         feature = feature.replace(r'\,\s?\,?$|none\,', 'none', regex=True)
-
+        feature = feature.str.strip()
+        
         # Convert NaN to 'a'. Then when counted this will
         # be a 1. Whilst not 0, any entry with 1 is virtually
         # meaningless, so 1 is a proxy for 0.

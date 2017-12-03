@@ -1,12 +1,11 @@
 language: python
 python:
-  - "3.5"
-  - "3.6" # 3.5 development branch
-  - "3.6-dev" # 3.5 development branch
+  - "3.6" # 3.6 development branch
+  - "3.6-dev" # 3.6 development branch
 # command to install dependencies
 install:
   - "pip install -r requirements.txt"
   - "pip install codecov"
 # command to run tests
-script: "cd tests && nosetests --with-coverage"
+script: "cd tests && pytest"
 after_success: codecov

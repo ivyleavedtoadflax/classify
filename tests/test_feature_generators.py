@@ -22,7 +22,7 @@ class TestFeatureGenerators(object):
         print('Testing functions which clean and create new features')
 
         self.test_case = pd.Series([
-        '-', ' ', 'none, ', 'What is my purpose?', 'You pass butter!'
+            '-', ' ', 'none, ', 'What is my purpose?', 'You pass butter!'
         ])
 
         # Define the output dataframe expected from date_features
