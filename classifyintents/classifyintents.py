@@ -142,11 +142,11 @@ class survey:
         # the incoming columns are checked against raw_columns, which does not contain
         # target.
 
-        self.data['comment_other_found_what'] = extract_other(self.data['cat_found_looking_for'])
-        self.data['comment_other_else_help'] = extract_other(self.data['cat_anywhere_else_help'])
+        #self.data['comment_other_found_what'] = extract_other(self.data['cat_found_looking_for'])
+        #self.data['comment_other_else_help'] = extract_other(self.data['cat_anywhere_else_help'])
         
-        self.data['cat_found_looking_for'] = rewrite_other(self.data['cat_found_looking_for'])
-        self.data['cat_anywhere_else_help'] = rewrite_other(self.data['cat_anywhere_else_help'])  
+        #self.data['cat_found_looking_for'] = rewrite_other(self.data['cat_found_looking_for'])
+        #self.data['cat_anywhere_else_help'] = rewrite_other(self.data['cat_anywhere_else_help'])  
 
         # Check here: if target is not in the raw data, i.e. we are predicting, not
         # training, then add the column to the dataframe.
@@ -487,6 +487,8 @@ class survey:
             self.logger.info('Dropping any remaining NAs')
             self.logger.info('cleaned shape before dropping:\n%s',
                              self.cleaned.shape)
+            self.logger.debug('NA columns:\n%s', 
+                              self.cleaned[self.cleaned.isnull().any(axis=1)])
 
             self.cleaned = self.cleaned.dropna(how='any')
 
