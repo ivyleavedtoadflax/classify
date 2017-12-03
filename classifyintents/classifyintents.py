@@ -58,9 +58,6 @@ class survey:
 
             self.raw = pd.read_csv(path)
 
-            # NOTE: From 0.6.1 the assumption is made that this data has been cleaned
-            # first, nomially using the R script: reformat.R
-
             # Strip whitespace from columns to save problems later!
             # Remove no break whitespace first.
 
@@ -150,8 +147,6 @@ class survey:
         if 'target' not in self.data.columns.tolist():
             self.data['target'] = str()
 
-        # NOTE: This step of dropping additional columns, is not required here.
-
         self.data = self.data[cols]
 
         # Arrange date features
@@ -190,12 +185,6 @@ class survey:
                 # data. That it is empty is an importat feature in itself.
 
                 all_null = self.data[col].isnull().sum() == len(self.data[col])
-#                all_none = (self.data[col] == 'none').sum() == len(self.data[col])
-
-#                self.logger.debug('Does %s contain all nulls?\n%s', col, all_null)
-#                self.logger.debug('Does %s contain all nones?\n%s', col, all_none)
-
-#                mask = any([all_null, all_none])
 
                 self.data[col] = clean_category(self.data[col])
                 # Now clean the comment variables
@@ -203,16 +192,13 @@ class survey:
                 if 'comment' in col and not all_null:
                     self.data[col + '_capsratio'] = [string_capsratio(x) for x in self.data[col]]
                     self.data[col + '_nexcl'] = [string_nexcl(x) for x in self.data[col]]
-                    self.logger.debug('self.data[%s]:\n%s', col, self.data[col])
                     self.logger.debug('self.data[%s]:\n%s', col, self.data[col].dtype)
 
                     self.data[col + '_len'] = string_len(self.data[col])
                     self.data[col] = clean_comment(self.data[col])
 
                     # Some issues with the string_len function exposed here in debug
-                    self.logger.debug('self.data[%s]:\n%s', col,
-                                      pd.concat([self.data[col], self.data[col + '_len']], axis=1))
-
+                    
                     self.logger.info('Added string features to %s', col)
                     self.logger.debug('head of %s column: \n%s',
                                       col + '_capsratio', self.data[col + '_capsratio'].head())
@@ -242,8 +228,7 @@ class survey:
         # a DataFrame called unique_pages.
 
         # NOTE: Quick fix here - convert the org and section columns back to
-        # strings, they previously were converted to categorical. Need to
-        # fix this higher upstream.
+        # strings, they previously were converted to categorical. 
 
         self.data.org = self.data.org.astype('str')
         self.data.section = self.data.section.astype('str')
@@ -358,10 +343,7 @@ class survey:
             response = get_org(page)
             org_sect.append(response)
 
-            # NOTE: as of 2017-12-02 I have experienced difficulties running the API lookup
-            # from a laptop not connected to the VPN. Introduce a pause here to reduce the
-            # rate of requests being sent to the API. There is no logic to the size of this
-            # sleep.
+            # NOTE: Add a wait here to slow barrage of requests to content API.
 
             time.sleep(wait)
 
@@ -445,10 +427,6 @@ class survey:
                 encoder = LabelEncoder()
                 encoder.fit(self.cleaned[col]) 
 
-                self.logger.debug('%s converted to the following integers:\n%s',
-                                  col, dict(zip(encoder.transform(self.cleaned[col]),
-                                                self.cleaned[col])))
-
                 self.cleaned.loc[:, col] = encoder.transform(self.cleaned.loc[:, col])
 
             # Convert targets to integer classes
@@ -464,10 +442,7 @@ class survey:
 
             targets_numeric = [1 if x in bin_true else 0 for x in self.cleaned['target']]
 
-            self.logger.debug('Targets converted to the following integers:\n%s',
-                              dict(zip(targets_numeric, self.cleaned['target'])))
-
-            self.cleaned['targets'] = targets_numeric
+            self.cleaned['target'] = targets_numeric
 
             self.cleaned.drop('respondent_id', axis=1, inplace=True)
 
@@ -491,6 +466,7 @@ class survey:
         try:
 
             self.logger.debug(self.data.columns)
+
             self.cleaned = self.data.copy()
             self.cleaned = self.data[self.selection]
 
@@ -498,7 +474,7 @@ class survey:
             self.logger.info('cleaned shape before dropping:\n%s',
                              self.cleaned.shape)
             self.logger.debug('Columns containing NAs:\n%s',
-                              self.cleaned.loc[:, self.cleaned.isnull().any()])
+                              self.cleaned.loc[0:10, self.cleaned.isnull().any()])
             self.logger.debug('cleaned.dtype:\n%s', self.cleaned.dtypes)
 
             self.cleaned = self.cleaned.dropna(how='any')
@@ -700,7 +676,7 @@ def clean_category(feature):
         feature = feature.fillna('none')
         feature = pd.Series(feature)
         feature = feature.astype('category')
-        
+
     except Exception:
         print('There was an error cleaning the column.')
         raise
@@ -769,7 +745,7 @@ def lookup(r, page, index):
 
     try:
         if page == 'mainstream_browse_pages':
-            x = r['results'][0][page][index]            
+            x = r['results'][0][page][index]
         elif page == 'organisations':
             x = r['results'][0][page][index]['title']
         else:
@@ -793,8 +769,6 @@ def get_org(page):
     #self.logger.info('Looking up ' + url)
 
     try:
-
-        #url = "https://www.gov.uk/api/search.json?filter_link[]=%s&fields=y" % (x, y)
 
         # read JSON result into r
         r = requests.get(url).json()
@@ -881,14 +855,14 @@ def reg_match(r, x, i):
 
 def extract_other(x):
     try:
-        
+
         # NOTE: Weirdness with some columns being filled with just a comma.
-        # Is this due to improper handling of the csv file somewhere?        
+        # Is this due to improper handling of the csv file somewhere?
         x = x.fillna('none')
         x = x.replace(r'^Yes$|^No$|^Not sure / Not yet$', 'none', regex=True)
 
     except Exception:
-        print('There was an error cleaning the', x ,'column.')
+        print('There was an error extracting "other" class form feature')
         raise
     return x
 
@@ -902,7 +876,7 @@ def rewrite_other(x):
         x[~x.str.match('^Yes$|^No$|^Not sure / Not yet$', na=False)] = 'other'
 
     except Exception:
-        print('There was an error cleaning the', x ,'column.')
+        print('There was an error rewriting "other" class from feature')
         raise
     return x
  
