@@ -46,10 +46,6 @@ class survey:
         """
         Load the data from csv file
 
-        The data file will need to have been through some initial cleaning.
-        This is currently handled by the R script reformat.R
-        (https://raw.githubusercontent.com/ukgovdatascience/classifyintentspipe/1de84e053e485c53fd2d82c9512b0dc084487d83/reformat.R)
-
         An initial check is run to ensure that expect column names are present.
 
         :param path: <str> Path to the data file.
@@ -67,14 +63,23 @@ class survey:
 
             # Strip whitespace from columns to save problems later!
             # Remove no break whitespace first.
-            
-            #self.raw.columns = [i.replace("\xa0", " ") for i in self.raw.columns]
-            #self.raw.columns = self.raw.columns.str.strip()
-            
+
+            self.raw.columns = [i.replace("\xa0", " ") for i in self.raw.columns]
+            self.raw.columns = self.raw.columns.str.strip()
+
             # Force UserID to be integer (to prevent the addition of decimal places)
 
-            #self.raw['UserID'] = self.raw['UserID'].astype('int')
-            
+            self.raw['UserID'] = self.raw['UserID'].astype('int')
+
+            self.logger.info('Shape of %s: %s', path, self.raw.shape)
+
+            self.raw.dropna(subset=['UserID'], inplace=True)
+
+            self.logger.info('Shape of %s after dropping missing UserIDs: %s',
+                             path, self.raw.shape)
+
+            self.logger.debug('self.raw.dtypes:\n%s', self.raw.dtypes)
+
         except FileNotFoundError:
             self.logger.exception('Input file %s does not exist', path)
             raise
@@ -83,70 +88,61 @@ class survey:
             self.logger.error('Unexpected error loading raw data from file %s', path)
             raise
 
-        # Run check on the incoming columns against expected
-        try:
-
-            assert set(self.raw.columns) == set(self.raw_mapping.values())
-
-        except AssertionError:
-            self.logger.error('Incorrect columns in %s:', path)
-            self.logger.error('Expected:\n%s\nReceived:\n%s',
-                              set(self.raw.columns), set(self.raw_mapping.values()))
-            raise
-
-        self.logger.info('Shape of %s: %s', path, self.raw.shape)
-        self.raw.dropna(subset=['respondent_id'], inplace=True)
-
-        self.logger.info('Shape of %s after dropping missing respondent_ids %s',
-                         path, self.raw.shape)
-
-        # Convert respondent_id to int.
-
-        self.raw['respondent_id'] = self.raw['respondent_id'].astype('int')
-        self.logger.debug('%s', self.raw.dtypes)
-
-        # Define mappings and columns used in iterators
-
-        # Clean date columns
 
     def clean_raw(self, date_format=None):
+        """
+        Clean the raw dataframe
+
+        Takes the self.raw object, and produces the self.data object
+
+        :param date_format: Date format to be passed to the clean_date function
+        """
 
         self.logger.info('Running clean_raw method')
         self.logger.info('The cleaned data are stored in survey.data')
 
         self.data = self.raw.copy()
 
-        # NOTE: in 0.6.1> it is assumed that this process is being done
-        # prior to the data being loaded by the survey class. It would
-        # be good to do the process here, but for now, assume that it is
-        # being done prior to loading.
-
         # Use mapping to rename and subset columns
 
-        #self.data.rename(columns = self.raw_mapping, inplace=True)
-
-        # NOTE: in 0.6.1> In the assertion in the .load method we assume that the right
-        # columns are passed, so no columns need to be dropped here.
+        self.data.rename(columns=self.raw_mapping, inplace=True)
 
         # Subset columns mentioned in mapping dict
 
         cols = list(self.raw_mapping.values())
-        
-        # Strip down only to the columns listed in raw.mapping - append code1 here
+
+        # Strip down only to the columns listed in raw.mapping - append target here
         # as it should always now be present in the data. Also include the
         # comment_other columns.
 
         cols.extend(['target'])
 
-        # NOTE: in 0.6.1> this functionality is not used, because in the .load method,
-        # the incoming columns are checked against raw_columns, which does not contain
-        # target.
+        # NOTE: the 'comment_other_where_for_help' column is no longer contained
+        # in smartsurvey data, but is a required feature for the older models.
+        # Add it in here while there is a reliance on the older models, but in 
+        # future it can be happily removed.
 
-        #self.data['comment_other_found_what'] = extract_other(self.data['cat_found_looking_for'])
-        #self.data['comment_other_else_help'] = extract_other(self.data['cat_anywhere_else_help'])
-        
-        #self.data['cat_found_looking_for'] = rewrite_other(self.data['cat_found_looking_for'])
-        #self.data['cat_anywhere_else_help'] = rewrite_other(self.data['cat_anywhere_else_help'])  
+        self.data['comment_other_where_for_help'] = np.nan
+
+        self.data['comment_other_found_what'] = extract_other(self.data['cat_found_looking_for'])
+        self.data['comment_other_else_help'] = extract_other(self.data['cat_anywhere_else_help'])
+
+        self.data['cat_found_looking_for'] = rewrite_other(self.data['cat_found_looking_for'])
+        self.data['cat_anywhere_else_help'] = rewrite_other(self.data['cat_anywhere_else_help'])
+
+        # Check output of the _other functions
+
+        self.logger.debug('values of cat_anywhere_else_help:\n%s',
+                          self.data['cat_anywhere_else_help'].value_counts())
+        self.logger.debug('head of comment_other_else_help '
+                          '(extracted from cat_anywhere_else_help:\n%s',
+                          self.data['comment_other_else_help'].head())
+
+        self.logger.debug('values of cat_other_found_what:\n%s',
+                          self.data['cat_found_looking_for'].value_counts())
+        self.logger.debug('head of comment_other_found_what '
+                          '(extracted from cat_other_found_what):\n%s',
+                          self.data['comment_other_found_what'].head())
 
         # Check here: if target is not in the raw data, i.e. we are predicting, not
         # training, then add the column to the dataframe.
@@ -164,14 +160,12 @@ class survey:
         self.data['end_date'] = clean_date(self.data['end_date'], date_format)
 
         self.logger.info('Added date features: start_date and end_date')
-        self.logger.debug("Head of data['start_date']: %s", self.data['start_date'].head())
-        self.logger.debug("Head of data['end_date']: %s", self.data['start_date'].head())
-
+        self.logger.debug("Head of data['start_date']:\n%s", self.data['start_date'].head())
+        self.logger.debug("Head of data['end_date']:\n%s", self.data['start_date'].head())
         # Create time delta and normalise
 
         self.data['time_delta'] = time_delta(self.data['end_date'], self.data['start_date'])
         self.data['time_delta'] = normalise(self.data['time_delta'])
-
         self.logger.info('Added date feature: time_delta')
         self.logger.debug("Head of data['time_delta']: %s", self.data['time_delta'].head())
 
@@ -211,6 +205,8 @@ class survey:
                     self.data[col + '_nexcl'] = [string_nexcl(x) for x in self.data[col]]
                     self.data[col + '_len'] = string_len(self.data[col])
                     self.data[col] = clean_comment(self.data[col])
+                    self.logger.debug('self.data[%s]:\n%s', col, 
+                                      pd.concat([self.data[col], self.data[col + '_len']], axis=1))
 
                     self.logger.info('Added string features to %s', col)
                     self.logger.debug('head of %s column: \n%s',
@@ -468,6 +464,12 @@ class survey:
 
             self.cleaned.drop('respondent_id', axis=1, inplace=True)
 
+            assert self.cleaned.shape[0] > 0
+
+        except AssertionError:
+            self.logger.error('self.cleaned did not return any rows')
+            raise
+
         except Exception:
             self.logger.error('Error while running trainer method')
             raise
@@ -487,8 +489,9 @@ class survey:
             self.logger.info('Dropping any remaining NAs')
             self.logger.info('cleaned shape before dropping:\n%s',
                              self.cleaned.shape)
-            self.logger.debug('NA columns:\n%s', 
-                              self.cleaned[self.cleaned.isnull().any(axis=1)])
+            self.logger.debug('Columns containing NAs:\n%s',
+                              self.cleaned.loc[:, self.cleaned.isnull().any()])
+            self.logger.debug('cleaned.dtype:\n%s', self.cleaned.dtypes)
 
             self.cleaned = self.cleaned.dropna(how='any')
 
@@ -512,8 +515,14 @@ class survey:
 
             self.logger.info('Final shape of cleaned: %s', self.cleaned.shape)
 
+            assert self.cleaned.shape[0] > 0
+
+        except AssertionError:
+            self.logger.error('self.cleaned did not return any rows')
+            raise
+
         except Exception:
-            self.logger.error('There was an error while subsetting survey data')
+            self.logger.error('There was an error running the predictor method')
             raise
 
     raw_mapping = {
@@ -583,12 +592,12 @@ def string_len(feature):
         feature = pd.Series([len(y) for y in feature.fillna('a')])
         # Now normalise the scores
 
-        ratio = (feature - feature.mean()) / (feature.max() - feature.min())
+        normalised = (feature - feature.mean()) / (feature.max() - feature.min())
 
     except Exception:
         print('There was an error converting feature to string length column')
         raise
-    return ratio
+    return normalised
 
 def string_capsratio(feature):
     """
@@ -603,7 +612,7 @@ def string_capsratio(feature):
             feature = 0
 
     except Exception:
-        print('There was an error creating capitals ratio on column: ' + feature)
+        print('There was an error creating capitals ratio')
         raise
     return feature
 
@@ -620,7 +629,7 @@ def string_nexcl(feature):
             feature = 0
 
     except Exception:
-        print('There was an error creating n of exclamations on column')
+        print('There was an error creating n of exclamations')
         raise
     return feature
 
@@ -856,29 +865,27 @@ def reg_match(r, x, i):
 def extract_other(x):
     try:
         
-        # Weirdness with some columns being filled with just a comma.
+        # NOTE: Weirdness with some columns being filled with just a comma.
         # Is this due to improper handling of the csv file somewhere?        
         x = x.fillna('none')
         x = x.replace(r'^Yes$|^No$|^Not sure / Not yet$', 'none', regex=True)
 
-    except Exception as e:
+    except Exception:
         print('There was an error cleaning the', x ,'column.')
-        print('Original error message:')
-        print(repr(e))
-    return(x)
+        raise
+    return x
 
 
 def rewrite_other(x):
     try:
         
-        # Weirdness with some columns being filled with just a comma.
+        # NOTE: Weirdness with some columns being filled with just a comma.
         # Is this due to improper handling of the csv file somewhere?        
         x = x.fillna('none')
         x[~x.str.match('^Yes$|^No$|^Not sure / Not yet$', na=False)] = 'other'
 
-    except Exception as e:
+    except Exception:
         print('There was an error cleaning the', x ,'column.')
-        print('Original error message:')
-        print(repr(e))
-    return(x)
+        raise
+    return x
  
