@@ -1,10 +1,10 @@
 init:
-	pip install -r requirements
+	pip3 install -r requirements
 
 localinit:
-	pip install --editable .
+	pip3 install --editable .
 
 test:
-	cd tests && nosetests
+	cd tests && python3 -m pytest
 
 .PHONY: init test 
