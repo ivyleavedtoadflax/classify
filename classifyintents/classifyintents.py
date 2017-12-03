@@ -7,9 +7,9 @@ wrangling data from the govuk intent survey.
 import re
 import sys
 import time
-import requests
 import logging
 import logging.config
+import requests
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
@@ -21,7 +21,7 @@ class survey(object):
         """
         Instantiate the class
 
-        Expects a logging object to have been created in the 
+        Expects a logging object to have been created in the
         script executing the class.
         """
 
@@ -33,7 +33,14 @@ class survey(object):
         self.unique_pages = pd.DataFrame()
         self.org_sect = pd.DataFrame()
         self.cleaned = pd.DataFrame()
-        self.encoder = LabelEncoder()
+
+        # TODO: LabelEncoder() is used both to convert categorical variables to 
+        # integer, and for converting the targets to integer classes. Only the
+        # latter is recorded to the class, the other encoders are ephemeral. These
+        # encoders need to be made available for calculating features in new data
+        # in future versions.
+
+        self.target_encoder = LabelEncoder()
 
     def load(self, path):
         """
@@ -77,7 +84,7 @@ class survey(object):
         self.logger.info('Shape of %s: %s', path, self.raw.shape)
         self.raw.dropna(subset=['respondent_id'], inplace=True)
 
-        self.logger.info('Shape of %s after dropping missing respondent_ids %s', 
+        self.logger.info('Shape of %s after dropping missing respondent_ids %s',
                          path, self.raw.shape)
 
         # Convert respondent_id to int.
@@ -96,7 +103,7 @@ class survey(object):
 
         self.data = self.raw.copy()
 
-        # NOTE: in 0.5.6> it is assumed that this process is being done
+        # NOTE: in 0.6.1> it is assumed that this process is being done
         # prior to the data being loaded by the survey class. It would
         # be good to do the process here, but for now, assume that it is
         # being done prior to loading.
@@ -105,19 +112,19 @@ class survey(object):
 
         #self.data.rename(columns = self.raw_mapping, inplace=True)
 
-        # NOTE: in 0.5.6> In the assertion in the .load method we assume that the right
+        # NOTE: in 0.6.1> In the assertion in the .load method we assume that the right
         # columns are passed, so no columns need to be dropped here.
 
         # Subset columns mentioned in mapping dict
 
         cols = list(self.raw_mapping.values())
-        
+
         # Strip down only to the columns listed in raw.mapping - append target here
-        # as it should always now be present in the data.    
-        
+        # as it should always now be present in the data.
+
         cols.extend(['target'])
-        
-        # NOTE: in 0.5.6> this functionality is not used, because in the .load method,
+
+        # NOTE: in 0.6.1> this functionality is not used, because in the .load method,
         # the incoming columns are checked against raw_columns, which does not contain
         # target.
 
@@ -125,12 +132,12 @@ class survey(object):
         # training, then add the column to the dataframe.
 
         if 'target' not in self.data.columns.tolist():
-            self.data['target'] = str()            
-        
+            self.data['target'] = str()
+
         # NOTE: This step of dropping additional columns, is not required here.
 
-        #self.data = self.data[cols]
-        
+        self.data = self.data[cols]
+
         # Arrange date features
 
         self.data['start_date'] = clean_date(self.data['start_date'], date_format)
@@ -156,14 +163,7 @@ class survey(object):
             date_features(self.data['start_date']),
             self.data], axis=1)
 
-        # Classify all empty relevant comments as 'none'. This has been moved out of the class!
-        # Need to have a think about whether this should be in the class or not!
-
-        #no_comments = (self.data['comment_further_comments'] == 'none') & (self.data['comment_where_for_help'] == 'none') & (self.data['comment_other_where_for_help'] == 'none') & (self.data['comment_why_you_came'] == 'none')
-
-        #self.data.loc[no_comments,'target'] = 'none'
-
-        # Features on column names
+        # Create features on column names
 
         try:
             for col in self.data:
@@ -397,7 +397,7 @@ class survey(object):
         Prepare the data for training
         """
 
-        self.logger.info('***** Running trainer method *****')
+        self.logger.info('Running trainer method')
 
         if classes is None:
             classes = ['ok']
@@ -418,20 +418,33 @@ class survey(object):
             # LabelEncoder converts labels into numeric codes for all of the factors.
 
             for col in self.categories:
-                self.cleaned.loc[:, col] = self.encoder.fit_transform(self.cleaned.loc[:,col])
 
-            self.encoder.fit(self.cleaned['target'])
-            self.cleaned['target'] = self.encoder.transform(self.cleaned['target'])
+                encoder = LabelEncoder()
+                encoder.fit(self.cleaned[col]) 
 
-            # At present this deals only with the binary case. Would be
-            # good to generalise this in future to allow it to be customised.
+                self.logger.debug('%s converted to the following integers:\n%s',
+                                  col, dict(zip(encoder.transform(self.cleaned[col]),
+                                                self.cleaned[col])))
+
+                self.cleaned.loc[:, col] = encoder.transform(self.cleaned.loc[:, col])
+
+            # Convert targets to integer classes
+
+            self.target_encoder.fit(self.cleaned['target'])
+            self.cleaned['target'] = self.target_encoder.transform(self.cleaned['target'])
+
+            # TODO: At present this deals only with the binary case. Would be
+            # good to generalise this in to allow it to be customised.
             # This codes the outcomes as 0 or 1, but ideall would do 0, 1, 2, etc.
 
-            bin_true = self.encoder.transform(classes)
+            bin_true = self.target_encoder.transform(classes)
 
-            self.cleaned['code'] = [1 if x in bin_true else 0 for x in self.cleaned['code']]
-            #self.cleaned.loc[self.cleaned['code'] not in self.bin_true,'code'] = 0
-            #self.cleaned.loc[self.cleaned['code'] in self.bin_true,'code'] = 1
+            targets_numeric = [1 if x in bin_true else 0 for x in self.cleaned['target']]
+
+            self.logger.debug('Targets converted to the following integers:\n%s',
+                              dict(zip(targets_numeric, self.cleaned['target'])))
+
+            self.cleaned['targets'] = targets_numeric
 
             self.cleaned.drop('respondent_id', axis=1, inplace=True)
 
@@ -450,20 +463,36 @@ class survey(object):
 
             self.cleaned = self.data.copy()
             self.cleaned = self.data[self.selection]
-            self.cleaned = self.cleaned.dropna(how = 'any')
 
-# Debug            self.logger.info(self.cleaned.isnull().sum())
+            self.logger.info('Dropping any remaining NAs')
+            self.logger.info('cleaned shape before dropping:\n%s',
+                             self.cleaned.shape)
+
+            self.cleaned = self.cleaned.dropna(how='any')
+
+            self.logger.info('cleaned shape after dropping:\n%s',
+                             self.cleaned.shape)
 
             for col in self.categories:
-                self.cleaned.loc[:,col] = self.econder.fit_transform(self.cleaned.loc[:,col])
 
-            self.cleaned.drop('respondent_ID', axis=1, inplace=True)            
+                encoder = LabelEncoder()
+                encoder.fit(self.cleaned[col])
 
-        except Exception as e:
-            self.logger.info('There was an error while subsetting survey data')
-            self.logger.info('Original error message:')
-            self.logger.info(repr(e))
+                self.logger.debug('%s converted to the following integers:\n%s',
+                                  col, dict(zip(encoder.transform(self.cleaned[col]),
+                                                self.cleaned[col])))
 
+                self.cleaned.loc[:, col] = encoder.transform(self.cleaned.loc[:, col])
+
+            self.logger.info('Dropping respondent_id from cleaned')
+
+            self.cleaned.drop('respondent_id', axis=1, inplace=True)
+
+            self.logger.info('Final shape of cleaned: %s', self.cleaned.shape)
+
+        except Exception:
+            self.logger.error('There was an error while subsetting survey data')
+            raise
 
     raw_mapping = {
         'UserID':'respondent_id',
@@ -471,209 +500,236 @@ class survey(object):
         'Ended': 'end_date',
         'Page Path':'full_url',
         'Unique ID':'collector_id',
-#        'Tracking Link':'tracking_link',
         'Q1. Are you using GOV.UK for professional or personal reasons?':'cat_work_or_personal',
         'Q2. What kind of work do you do?':'comment_what_work',
         'Q3. Describe why you came to GOV.UK todayPlease do not include personal or financial information, eg your National Insurance number or credit card details.':'comment_why_you_came',
         'Q4. Have you found what you were looking for?':'cat_found_looking_for',
         'Q5.1.':'cat_satisfaction',
-       'Q6. Have you been anywhere else for help with this already?':'cat_anywhere_else_help',
+        'Q6. Have you been anywhere else for help with this already?':'cat_anywhere_else_help',
         'Q7. Where did you go for help?':'comment_where_for_help',
         'Q8. If you wish to comment further, please do so here.Please do not include personal or financial information, eg your National Insurance number or credit card details.':'comment_further_comments',
-    'Unnamed: 13':'comment_other_found_what',
-    'Unnamed: 17':'comment_other_else_help',
-    'dummy':'comment_other_where_for_help'
-    }
+        'Unnamed: 13':'comment_other_found_what',
+        'Unnamed: 17':'comment_other_else_help',
+        'dummy':'comment_other_where_for_help'
+        }
 
     categories = [
-        # May be necessary to include date columns at some juncture  
-        #'weekday', 'day', 'week', 'month', 'year', 
-        'org', 'section', 'cat_work_or_personal', 
-        'cat_satisfaction', 'cat_found_looking_for', 
+        'org', 'section', 'cat_work_or_personal',
+        'cat_satisfaction', 'cat_found_looking_for',
         'cat_anywhere_else_help'
     ]
-  
+
     comments = [
         'comment_what_work', 'comment_why_you_came', 'comment_other_found_what',
-        'comment_other_else_help', 'comment_other_where_for_help', 'comment_where_for_help', 'comment_further_comments'
+        'comment_other_else_help', 'comment_other_where_for_help',
+        'comment_where_for_help', 'comment_further_comments'
     ]
-    
+
     codes = [
         'target'
     ]
-    
-    # Could do some fuzzy matching here to improve matching to category names
-    # Some training examples are likely to be lost in clean_codes due to
-    # inconsistent naming of classes by volunteers.
-    
+
     code_levels = [
-    'ok', 'finding-general', 'service-problem', 'contact-government', 
-    'check-status', 'change-details', 'govuk-specific', 'compliment',
-    'complaint-government','notify', 'internal', 'pay', 'report-issue',
-    'address-problem', 'verify'
+        'ok', 'finding-general', 'service-problem', 'contact-government',
+        'check-status', 'change-details', 'govuk-specific', 'compliment',
+        'complaint-government', 'notify', 'internal', 'pay', 'report-issue',
+        'address-problem', 'verify'
     ]
 
-    selection = ['respondent_id', 'weekday', 'day', 'week', 'month', 'year', 'time_delta'] + categories + [(x + '_len') for x in comments] + [(x + '_nexcl') for x in comments] + [(x + '_capsratio') for x in comments]
+    selection = (['respondent_id', 'weekday', 'day', 'week', 'month', 'year', 'time_delta'] +
+                 categories + [(x + '_len') for x in comments] +
+                 [(x + '_nexcl') for x in comments] + [(x + '_capsratio') for x in comments])
 
-def drop_sub(x):
-    if x.iloc[0,].str.match('Open-Ended Response').sum():
-        x.drop(0, inplace=True)
-    return(x)
 
-def string_len(x):
+def string_len(feature):
+    """
+     Calculate feature length of comment features
+
+    :param feature: <pd.Series> Comment feature.
+    """
     try:
 
-        x = x.str.strip()
-        x = x.str.lower()
+        feature = feature.str.strip()
+        feature = feature.str.lower()
 
-        x = x.replace(r'\,\s?\,?$|none\,', 'none', regex=True)
-        
+        feature = feature.replace(r'\,\s?\,?$|none\,', 'none', regex=True)
+
         # Convert NaN to 'a'. Then when counted this will
         # be a 1. Whilst not 0, any entry with 1 is virtually
-        # meaningless, so 1 is a proxy for 0.
-        
-        x = pd.Series([len(y) for y in x.fillna('a')])
+        # meaningless, so 1 is a profeaturey for 0.
+
+        feature = pd.Series([len(y) for y in feature.fillna('a')])
         # Now normalise the scores
-        
-        x = (x - x.mean()) / (x.max() - x.min())
-               
-    except Exception as e:
-        self.logger.info('There was an error converting strings to string length column!')
-        self.logger.info('Original error message:')
-        self.logger.info(repr(e))
-    return(x)
 
-def string_capsratio(x):
+        ratio = (feature - feature.mean()) / (feature.max() - feature.min())
+
+    except Exception:
+        print('There was an error converting feature to string length column')
+        raise
+    return ratio
+
+def string_capsratio(feature):
+    """
+    Calculate ratio of capitals to all characters
+
+    :param feature: <pd.Series> Comment feature.
+    """
     try:
-        if not pd.isnull(x):
-            x = sum([i.isupper() for i in x])/len(x)
+        if not pd.isnull(feature):
+            feature = sum([i.isupper() for i in feature]) / len(feature)
         else:
-            x = 0
+            feature = 0
 
-    except Exception as e:
-        self.logger.info('There was an error creating capitals ratio on column: ' + x)
-        self.logger.info('Original error message:')
-        self.logger.info(repr(e))
-    return(x)
+    except Exception:
+        print('There was an error creating capitals ratio on column: ' + feature)
+        raise
+    return feature
 
-def string_nexcl(x):
+def string_nexcl(feature):
+    """
+    Calculate ratio of exclamations to all characters
+
+    :param feature: <pd.Series> Comment feature.
+    """
     try:
-        if not pd.isnull(x):
-            x = sum([i == '!' for i in x]) / len(x)
+        if not pd.isnull(feature):
+            feature = sum([i == '!' for i in feature]) / len(feature)
         else:
-            x = 0
+            feature = 0
 
-    except Exception as e:
-        self.logger.info('There was an error creating n of exclamations on column: ' + x)
-        self.logger.info('Original error message:')
-        self.logger.info(repr(e))
-    return(x)
-    
-def clean_date(x, format=None):
-    try:
-        x = pd.to_datetime(x, format=format)
-               
-    except Exception as e:
-        self.logger.info('There was an error cleaning the StartDate column!')
-        self.logger.info('Original error message:')
-        self.logger.info(repr(e))
-    return(x)
+    except Exception:
+        print('There was an error creating n of exclamations on column')
+        raise
+    return feature
 
-def date_features(x):
-    try:
-        x = pd.to_datetime(x)
-        
-        X = pd.DataFrame({
-                'weekday' : x.dt.weekday,
-                'day' : x.dt.day,
-                'week' : x.dt.week,
-                'month' : x.dt.month,
-                'year' : x.dt.year,
-             })
-        
-    except Exception as e:
-        self.logger.info('There was an error creating date feature: ' + x)
-        self.logger.info('Original error message:')
-        self.logger.info(repr(e))
-    return(X)
+def clean_date(feature, format=None):
+    """
+    Convert feature to a datetime object
 
-def clean_category(x):
+    :param feature: <pd.Series> Date feature.
+    """
     try:
-        
-        # May be needed if columns are integer
-        x = x.apply(str)
-        x = x.str.lower()
-        x = x.replace(r'null|\#Value\!', 'none', regex=True)
-        x = x.fillna('none')
-        x = pd.Series(x)
-        x = x.astype('category')
-        
-    except Exception as e:
-        self.logger.info('There was an error cleaning the', x ,'column.')
-        self.logger.info('Original error message:')
-        self.logger.info(repr(e))
-    return(x)
+        feature = pd.to_datetime(feature, format=format)
 
-def clean_comment(x):
+    except Exception:
+        print('There was an error cleaning the StartDate column!')
+        raise
+    return feature
+
+def date_features(feature):
+    """
+    Create time features from date time feature
+
+    :param feature: <pd.Series> Date feature.
+    """
     try:
+        feature = pd.to_datetime(feature)
+
+        date_features = pd.DataFrame({
+            'weekday' : feature.dt.weekday,
+            'day' : feature.dt.day,
+            'week' : feature.dt.week,
+            'month' : feature.dt.month,
+            'year' : feature.dt.year,
+        })
+
+    except Exception:
+        print('There was an error creating date feature')
+        raise
+    return date_features
+
+def clean_category(feature):
+    """
+    Clean categorical features
+
+    :param feature: <pd.Series> Categorical feature.
+    """
+    try:
+
+        feature = feature.apply(str)
+        feature = feature.str.lower()
+        feature = feature.replace(r'null|\#Value\!', 'none', regex=True)
+        feature = feature.fillna('none')
+        feature = pd.Series(feature)
+        feature = feature.astype('category')
         
-        x = x.str.strip()
-        x = x.str.lower()
-        
+    except Exception:
+        print('There was an error cleaning the column.')
+        raise
+    return feature
+
+def clean_comment(feature):
+    """
+    Clean comment features
+
+    :param feature: <pd.Series> Comment feature.
+    """
+    try:
+
+        feature = feature.str.strip()
+        feature = feature.str.lower()
+
         # Weirdness with some columns being filled with just a comma.
-        # Is this due to improper handling of the csv file somewhere?        
-        
-        x = x.replace(r'\,\s?\,?$|none\,', 'none', regex=True)
-        x = x.fillna('none')
-        
-    except Exception as e:
-        self.logger.info('There was an error cleaning the', x ,'column.')
-        self.logger.info('Original error message:')
-        self.logger.info(repr(e))
-    return(x)
-      
-def clean_code(x, levels):
+        # Is this due to improper handling of the csv file somewhere?
+
+        feature = feature.replace(r'\,\s?\,?$|none\,', 'none', regex=True)
+        feature = feature.fillna('none')
+
+    except Exception:
+        print('There was an error cleaning the column.')
+        raise
+    return feature
+
+def clean_code(feature, levels):
+    """
+    Clean target feature
+
+    :param feature: <pd.Series> Target feature.
+    """
     try:
 
        # If the whole column is not null
        # i.e. we want to train rather than just predict
 
-        if not pd.isnull(x).sum() == len(x):        
-            x = x.str.strip()
-            x = x.str.lower()
-            x = x.replace(r'\_', r'\-', regex=True)
-        
-            # Rules for fixing random errors.
-            # Commented out for now 
+        if not pd.isnull(feature).sum() == len(feature):
+            feature = feature.str.strip()
+            feature = feature.str.lower()
+            feature = feature.replace(r'\_', r'\-', regex=True)
 
-            #x = x.replace(r'^k$', 'ok', regex=True)
-            #x = x.replace(r'^finding_info$', 'finding_general', regex=True)
-            #x = x.replace(r'^none$', np.nan, regex=True)
-        
-            x[~x.isin(levels)] = np.nan
-            x = pd.Series(x)
-            x = x.astype('category')
-        
-    except Exception as e:
-        self.logger.info('There was an error cleaning the', x ,'column.')
-        self.logger.info('Original error message:')
-        self.logger.info(repr(e))
-    return(x)
+            feature[~feature.isin(levels)] = np.nan
+            feature = pd.Series(feature)
+            feature = feature.astype('category')
 
+    except Exception:
+        print('There was an error cleaning column.')
+        raise
+    return feature
+
+    def drop_sub(df):
+        """
+        Drop sub-heading created by survey platform
+        """
+        if df.iloc[0,].str.match('Open-Ended Response').sum():
+            df.drop(0, inplace=True)
+        return df
 ## Functions dealing with the API lookup
 
-def lookup(r,page,index):        
+def lookup(r, page, index):
+    """
+    Helper function for parsing results from api lookup
+    """
+
     try:
         if page == 'mainstream_browse_pages':
             x = r['results'][0][page][index]            
         elif page == 'organisations':
             x = r['results'][0][page][index]['title']
         else:
-            self.logger.info('page argument must be one of "organisations" or "mainstream_browse_pages"')
+            print('page argument must be one of "organisations" or "mainstream_browse_pages"')
             sys.exit(1)
-    except (IndexError, KeyError) as e:
+    except (IndexError, KeyError):
         x = 'null'
-    return(x)
+    return x
 
 def get_org(page):
     """
@@ -695,7 +751,7 @@ def get_org(page):
         # read JSON result into r
         r = requests.get(url).json()
 
-        # chose the fields you want to scrape. This scrapes the first 5 
+        # chose the fields you want to scrape. This scrapes the first 5
         # instances of organisation, error checking as it goes
         # this exception syntax might not work in Python 3
 
@@ -721,21 +777,21 @@ def get_org(page):
 
         return row
 
-    except Exception as e:
-        self.logger.info('Error looking up ' + url)
-        self.logger.info('Returning "none"')
+    except Exception:
+        print('Error looking up ' + url)
+        print('Returning "none"')
         row = ['none'] * 9
         return row
 
 ## Functions dealing with developing a time difference feature
 
 def normalise(x):
-    
+
     x = (x - np.mean(x)) / np.std(x)
-    return(x)
+    return x
 
 def time_delta(x,y):
-    
+
     # Expects datetime objects
 
     delta = x - y
@@ -747,19 +803,19 @@ def time_delta(x,y):
 
     # normalise statment moved to method to keep this function simple
 
-    return(delta)
+    return delta
 
 def reg_match(r, x, i):
 
     r = r + '/'
-    
+
     # r = uncompiled regex query
     # x = string to search
     # i = index of captive group (0 = all)
-    
+
     p = re.compile(r)
     s = p.search(x)
-    
+
     if s:
         t = re.split('\/', x, maxsplit=3)
         if i == 0:
@@ -768,7 +824,6 @@ def reg_match(r, x, i):
             found = '/' + t[1] + '/' + t[2]
         elif i == 2:
             found = t[2]
-    else: 
+    else:
         found = x
-    return(found)
-
+    return found
